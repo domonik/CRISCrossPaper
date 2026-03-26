@@ -1,0 +1,21 @@
+Query term	Match in database	Reason for match
+HEK293T cells	HEK293T	HEK293T is a derivative of the HEK293 cell line with the SV40 T-antigen; exact match present.
+Epithelial cells	epithelial cell	Generic epithelial cell term matches; multiple epithelial subtypes exist but base term fits best.
+HEK293 cells	HEK293	Exact match present in the database.
+K562 cells	K562	Exact match present; K562 is a human myelogenous leukemia cell line.
+U2OS cells	None	U2OS (human osteosarcoma) not listed — no close variant present.
+CD38+ NK cells	natural killer cell	CD38+ NK is a subset of natural killer cells; base NK cell type matches biologically.
+T cells	T-cell	General term directly matches “T-cell” entry.
+NYCE T cells	None	“NYCE T cells” refers to engineered T cells (e.g., gene-edited or CAR-T-like), no such term in the database.
+Neuro-2a cells	None	Neuro-2a (mouse neuroblastoma) not present in database; no matching neural cell line entry.
+Embryos in vivo	embryo	Matches general “embryo” entry representing in vivo embryonic samples.
+CD34+ HSPCs	hematopoietic stem cell	CD34+ hematopoietic stem and progenitor cells correspond to HSCs; “hematopoietic stem cell” fits.
+Xrcc4-/-p53-/- ESC-NPCs	neural progenitor cell	These are engineered neural progenitors derived from ESCs; closest biological match is “neural progenitor cell.”
+Xrcc4-/-p53-/- NSPCs	neural stem cell	NSPCs are neural stem/progenitor cells; “neural stem cell” is closest biological term.
+mESCs	mouse embryonic stem cell	Exact biological meaning; “mESCs” stands for mouse ESCs.
+B16-F10 cells	None	B16-F10 (mouse melanoma) not listed; no mouse melanoma line present.
+Liver in vivo	liver	Matches the tissue “liver” in database, representing in vivo liver samples.
+CMT iPSCs	None	“CMT” likely refers to patient-derived or disease-model iPSCs (e.g., Charcot-Marie-Tooth); no specific “CMT iPSC” entry.
+WTC-11 iPSCs	WTC11	Exact match found — “WTC11” iPSC line is in the database.
+HEK293FT cells	None	HEK293FT (a fast-growing HEK293T derivative) not explicitly listed; closest relatives HEK293/HEK293T but not identical.
+HeLa cells	HeLa-S3	HeLa-S3 is a subclone of HeLa cells; closest available match.
