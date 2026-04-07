@@ -4,7 +4,7 @@ import pandas as pd
 from multiprocessing import Pool, Manager, cpu_count
 
 
-parent_log_dirs = {"AGvsEPI": "RUNlogs/FineTuningPaperLeaveOneOutFixed", "Ablation": "RUNlogs/FineTuningAblationLeaveOneOutOnlyOverlap", "CRISPRAT": "RUNlogs/ArtificialFineTunePaper/", "NoPretrain": "RUNlogs/FineTuningPaperNoPretrain", "CrossCellType": "RUNlogs/CrossCellTypeTest/", "CrossCellTypeHistone": "RUNlogs/CrossCellTypeTestHistone/"}
+parent_log_dirs = {"AGvsEPI": "RUNlogs/FineTuningPaperLeaveOneOutFixed", "Ablation": "RUNlogs/FineTuningAblationLeaveOneOutOnlyOverlap", "CRISPRAT": "RUNlogs/ArtificialFineTunePaper/", "NoPretrain": "RUNlogs/FineTuningPaperNoPretrain", "CrossCellType": "RUNlogs/CrossCellTypeTest/"}
 pretrain_dir = "PretrainingPaperFixed"
 all_runs_data = []
 
@@ -133,7 +133,7 @@ for comparison, parent_log_dir in parent_log_dirs.items():
 full_val_rows_flat = list(chain.from_iterable(all_all_val_rows))
 val_curves = pd.DataFrame(full_val_rows_flat)
 val_curves["mode"] = val_curves["run"].str.split("/").str[0]
-val_curves.to_csv("validation_curves.tsv", sep="\t")
+val_curves.to_csv("../Results/CRISCross_validation_curves.tsv", sep="\t")
 # Convert to DataFrame
 df = pd.DataFrame(all_runs_data)
 df["window_size"] = df["run"].str.split("_ws").str[-1].str.split("_").str[0]
@@ -142,11 +142,8 @@ df["seed"] = df["run"].str.split("_seed").str[-1].str.split("_").str[0]
 df["split"] = df["run"].str.split("test_split").str[-1].str.split("/").str[0]
 df["mode"] = df["run"].str.split("/").str[0]
 df["dataset"] = df["run"].apply(lambda x: "K562" if "K562" in x else "Hek" if "Hek" in x else "T-Cell")
-breakpoint()
 #df = df[~df["mode"].str.contains("FineTuning")]
 df[df["mode"] == "Arti-Ws512-Epi"]
 ft_df = df[df["mode"] == "Arti-Ws512+AG_ccFineTuning"]
 test_df = df[df["mode"] == "Arti-Ws512+AG_ccTesting"]
-breakpoint()
-print(df)
-df.to_csv("tensorboard_summaryFineTuningPaper3.tsv", index=False, sep="\t")
+df.to_csv("../Results/CRISCrossTensorboard_summary.tsv", index=False, sep="\t")

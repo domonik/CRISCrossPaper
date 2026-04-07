@@ -11,7 +11,7 @@
 #SBATCH --requeue
 #SBATCH --exclude dlc2gpu07,dlc2gpu10,dlc2gpu09
 # Array settings
-#SBATCH --array=0-203%18    # adjust 11 to (num_configs - 1)
+#SBATCH --array=0-152%18    # adjust 11 to (num_configs - 1)
 
 source /home/rabsch/.bashrc
 miniforge activate CRISPRoff

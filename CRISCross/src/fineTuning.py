@@ -14,12 +14,12 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import multiprocessing.util
 import collections
 from typing import Dict, List, Tuple
-from models import CRISPROfft, CnnCRISPR, CRISCross, CrisprIP
-from Datasets import MATCH_ROW_NUMBER1, MyDataModule, EPI_FEATURES, GenomicDataModule
+from src.models import CRISPROfft, CnnCRISPR, CRISCross, CrisprIP
+from src.Datasets import MATCH_ROW_NUMBER1, MyDataModule, EPI_FEATURES, GenomicDataModule
 import json
 from torchmetrics import Metric
 from torchmetrics.functional import spearman_corrcoef
-from pretrain import PreTrainModel, get_logger
+from src.pretrain import PreTrainModel, get_logger
 
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -382,11 +382,11 @@ def run_training(config):
             else:
                 cur_chkpt = config["chkpt"]
             try:
-                ptm = PreTrainModel.load_from_checkpoint(cur_chkpt)
+                ptm = PreTrainModel.load_from_checkpoint(cur_chkpt, weights_only=False)
                 print("Using pretrained model")
                 model.model.load_state_dict(ptm.model.state_dict())
             except TypeError:
-                ptm = PLCRISPRWrapper.load_from_checkpoint(cur_chkpt)
+                ptm = PLCRISPRWrapper.load_from_checkpoint(cur_chkpt, weights_only=False)
                 model.model.load_state_dict(ptm.model.state_dict())
 
         callbacks = []
@@ -438,7 +438,7 @@ def run_training(config):
         if config["fit"]:
             trainer.fit(model, dm)
             load = checkpoint_cb.best_model_path
-            best_model = PLCRISPRWrapper.load_from_checkpoint(load)
+            best_model = PLCRISPRWrapper.load_from_checkpoint(load, weights_only=False)
             if "use_top_k" in config and config["use_top_k"] > 1:
                 if run_settings.iloc[train_test_split]["val_set"] is None:
                     ckpt_paths = checkpoint_cb._recent  # last k checkpoints

@@ -63,7 +63,7 @@ k562 = k562.rename(
 
 k562["GuideID"] = pd.factorize(k562["Guide_sequence"])[0]
 k562.to_csv("datasets/K562WithEpidir.tsv", sep="\t", index=False)
-datasets["K562"] = "datasetsK562WithEpidir.tsv"
+datasets["K562"] = "datasets/K562WithEpidir.tsv"
 
 RUNSETTINGSK562 = "runSettings/RunSettingsFullK562.tsv"
 data = {

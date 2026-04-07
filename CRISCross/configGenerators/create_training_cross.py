@@ -59,7 +59,7 @@ feature_sets = [
 
 ]
 
-windowsizes = [23, 32, 128, 512]
+windowsizes = [23, 128, 512]
 runs = [i * 42 for i in range(0, 1)]
 
 configs_l40s = []

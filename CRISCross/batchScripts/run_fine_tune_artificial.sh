@@ -11,9 +11,9 @@
 #SBATCH --requeue
 #SBATCH --exclude dlc2gpu07,dlc2gpu10,dlc2gpu09
 # Array settings
-#SBATCH --array=0-44%18    # adjust 11 to (num_configs - 1)
+#SBATCH --array=45-57%18    # adjust 11 to (num_configs - 1)
 
 source /home/rabsch/.bashrc
 miniforge activate CRISPRoff
 
-python src.fineTuning --config configs/run_artifical_configs_l40s.json
+python -m src.fineTuning --config configs/run_artifical_configs_l40s.json
