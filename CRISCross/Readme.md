@@ -267,6 +267,7 @@ All coordinate and chromosome values must be consistent with:
 # CRISPRAT Training Pipeline Tutorial
 
 This guide walks through the experiments conducted for our publication: dataset preparation, pretraining, and fine-tuning.
+The packages used in this publication are listed in `environment.yml`. Note that this environment may not work on all systems, as compatibility can depend on factors such as your CUDA version and hardware configuration.
 
 ---
 
