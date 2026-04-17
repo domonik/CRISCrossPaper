@@ -19,8 +19,23 @@ COLORS = {
     "jaxpetrol": "rgb(0, 103, 120)",
     "vikpurple": "rgb(79, 38, 131)",
     "bufblue": "rgb(0, 51, 141)",
-    "seagrey": "rgb(165, 172, 175)"
-
+    "bufred": "rgb(198, 12, 48)",
+    "miablue": "rgb(0, 142, 151)",
+    "miaorange": "rgb(252, 76, 2)",
+    "seagrey": "rgb(165, 172, 175)",
+    "seagreen": "rgb(105, 190, 40)",
+    # Categorical colors for discrete features
+    "cat1": "rgb(79, 38, 131)",
+    "cat2": "rgb(0, 51, 141)",
+    "cat3": "rgb(0, 142, 151)",
+    "cat4": "rgb(105, 190, 40)",
+    "cat5": "rgb(198, 12, 48)",
+    "cat6": "rgb(252, 76, 2)",
+    "cat7": "rgb(198, 12, 48)",
+    "cat8": "rgb(227, 119, 194)",
+    "cat9": "rgb(127, 127, 127)",
+    "cat10": "rgb(188, 189, 34)",
+    "cat11": "rgb(23, 190, 207)",
 }
 WIDTH = 691
 SINGLE_COL = 336

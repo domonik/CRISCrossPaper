@@ -62,29 +62,32 @@ class PlotlySHAPVisualizer:
         df = pd.DataFrame(data)
         return df
         
-    def summary_plot(self, max_features: int = 20, plot_type: str = "dot", colorscale = None, use_features = None, jitter_bin_width=0.01, max_jitter=0.3) -> go.Figure:
+    def summary_plot(self, max_features: int = 20, plot_type: str = "dot", colorscale = None, colorscale_continuous = None, use_features = None, jitter_bin_width=0.01, max_jitter=0.3,
+                     discrete_features: Optional[List[str]] = None) -> go.Figure:
         """
         Create a summary plot (bar or dot)
-        
+
         Args:
             max_features: Max features to show zero for all
             plot_type: "bar" or "dot"
+            discrete_features: List of feature names that are discrete (e.g., distance, binary features)
+                              For these features, categorical coloring is used instead of outlier-based coloring
         """
         # Calculate mean absolute SHAP values per feature
         mean_abs_shap = np.abs(self.values).mean(axis=0)
         mean_abs_shap = np.asarray(mean_abs_shap).flatten()  # Ensure 1D
-        
+
         # Sort by importance
-        
+
         indices = np.argsort(mean_abs_shap)[::-1]
         # Convert to Python list immediately
         if max_features:
             indices = indices[:max_features]
         indices = indices[::-1].tolist()
-        
+
         sorted_features = [self.feature_names[i] for i in indices]
         sorted_values = [float(mean_abs_shap[i]) for i in indices]
-        
+
         if use_features is not None:
             new_indices = []
             new_features = []
@@ -97,8 +100,8 @@ class PlotlySHAPVisualizer:
             sorted_features = new_features
             indices = new_indices
             sorted_values = new_values
-            
-        
+
+
         if plot_type == "bar":
             fig = go.Figure(go.Bar(
                 x=sorted_values,
@@ -113,74 +116,144 @@ class PlotlySHAPVisualizer:
                 showlegend=False
             )
         else:  # dot plot
-            fig = self._summary_dot_plot(indices, max_features, colorscale=colorscale, kde_bw=jitter_bin_width, max_jitter=max_jitter)
-        
+            fig = self._summary_dot_plot(indices, max_features, colorscale=colorscale, colorscale_continuous=colorscale_continuous,
+                                        kde_bw=jitter_bin_width, max_jitter=max_jitter, discrete_features=discrete_features)
+
         return fig
     
-    def _summary_dot_plot(self, indices: list, max_features: int, colorscale=None, max_jitter=0.3, kde_bw=0.1) -> go.Figure:
-        """Beeswarm-style SHAP plot with violin-shaped vertical jitter, handles zero/constant SHAP values"""
+    def _summary_dot_plot(self, indices: list, max_features: int, colorscale=None, colorscale_continuous=None,
+                          max_jitter=0.3, kde_bw=0.1, discrete_features: Optional[List[str]] = None) -> go.Figure:
+        """Beeswarm-style SHAP plot with violin-shaped vertical jitter, handles zero/constant SHAP values
+
+        Args:
+            indices: Feature indices to plot
+            max_features: Maximum number of features (not used internally but kept for API)
+            colorscale: Plotly colorscale to use for discrete features (Raw value colorbar)
+            colorscale_continuous: Plotly colorscale for continuous/binary features (Norm. value colorbar)
+                                   If None, uses the reverse of colorscale
+            max_jitter: Maximum jitter amount
+            kde_bw: Bandwidth for KDE density estimation
+            discrete_features: List of feature names that are discrete. Features with >2 unique values
+                              get their own colorbar showing raw values. Features with <=2 unique values
+                              (binary) use the continuous colorbar with normalized values.
+        """
         import numpy as np
         import plotly.graph_objects as go
 
+        # Set up discrete features set
+        if discrete_features is None:
+            discrete_features = []
+        discrete_features_set = set(discrete_features)
+
         fig = go.Figure()
+
+        # Track discrete and continuous traces for coloraxis assignment
+        # Discrete: n_unique > 2 (more than binary)
+        # Continuous: n_unique <= 2 (binary) OR not in discrete_features
+        discrete_trace_indices = set()
+        continuous_trace_indices = set()
+        first_discrete_info = None  # (unique_vals, n_unique) for first discrete feature
 
         for i, feat_idx in enumerate(indices):
             feat_idx = int(feat_idx)
+            feat_name = self.feature_names[feat_idx]
             shap_vals = self.values[:, feat_idx]
             feature_vals = self.data[:, feat_idx] if self.data is not None else np.arange(len(shap_vals))
 
             # Normalize feature values for color
             if hasattr(feature_vals, 'shape') and len(feature_vals.shape) > 1:
                 feature_vals = feature_vals.flatten()
-            try:
-                # Compute color limits robustly
-                vmin = np.nanpercentile(feature_vals, 5)
-                vmax = np.nanpercentile(feature_vals, 95)
-                if vmin == vmax:
-                    vmin = np.nanpercentile(feature_vals, 1)
-                    vmax = np.nanpercentile(feature_vals, 99)
-                    if vmin == vmax:
-                        vmin = np.min(feature_vals)
-                        vmax = np.max(feature_vals)
-                if vmin > vmax:  # fix rare numerical precision issues
-                    vmin = vmax
 
-                # Normalize feature values to [0,1] for color mapping
-                feature_vals_norm = (feature_vals - vmin) / (vmax - vmin + 1e-8)
-                feature_vals_norm = np.clip(feature_vals_norm, 0, 1) 
-            except:
-                feature_vals_norm = np.zeros_like(shap_vals)
+            # Check if this is a discrete feature
+            is_discrete = feat_name in discrete_features_set
+
+            # Get unique values count
+            unique_vals = np.unique(feature_vals)
+            n_unique = len(unique_vals)
+
+            # Determine if this feature uses discrete or continuous coloring
+            # Discrete: in discrete_features AND has more than 2 unique values
+            # Continuous: not in discrete_features OR has <=2 unique values (binary)
+            uses_discrete_coloring = is_discrete and n_unique > 2
+
+            if uses_discrete_coloring:
+                discrete_trace_indices.add(i)
+                # Track first discrete feature for colorbar ticks
+                if first_discrete_info is None:
+                    first_discrete_info = (unique_vals, n_unique)
+
+                if n_unique <= 10:  # Reasonable number of discrete categories
+                    # Create a mapping from value to category index
+                    val_to_cat = {v: idx for idx, v in enumerate(unique_vals)}
+                    cat_indices = np.array([val_to_cat[v] for v in feature_vals])
+                    # Use the category index for coloring (normalized to [0,1])
+                    feature_vals_norm = cat_indices / (n_unique - 1) if n_unique > 1 else np.zeros_like(shap_vals)
+                else:
+                    # Fallback to percentile-based coloring if too many unique values
+                    vmin = np.nanpercentile(feature_vals, 5)
+                    vmax = np.nanpercentile(feature_vals, 95)
+                    if vmin == vmax:
+                        vmin = np.nanpercentile(feature_vals, 1)
+                        vmax = np.nanpercentile(feature_vals, 99)
+                        if vmin == vmax:
+                            vmin = np.min(feature_vals)
+                            vmax = np.max(feature_vals)
+                    feature_vals_norm = (feature_vals - vmin) / (vmax - vmin + 1e-8)
+                    feature_vals_norm = np.clip(feature_vals_norm, 0, 1)
+            else:
+                continuous_trace_indices.add(i)
+                # Continuous/binary features: use percentile-based outlier-aware coloring
+                try:
+                    vmin = np.nanpercentile(feature_vals, 5)
+                    vmax = np.nanpercentile(feature_vals, 95)
+                    if vmin == vmax:
+                        vmin = np.nanpercentile(feature_vals, 1)
+                        vmax = np.nanpercentile(feature_vals, 99)
+                        if vmin == vmax:
+                            vmin = np.min(feature_vals)
+                            vmax = np.max(feature_vals)
+                    if vmin > vmax:
+                        vmin = vmax
+                    feature_vals_norm = (feature_vals - vmin) / (vmax - vmin + 1e-8)
+                    feature_vals_norm = np.clip(feature_vals_norm, 0, 1)
+                except:
+                    feature_vals_norm = np.zeros_like(shap_vals)
+
             base_y = np.full_like(shap_vals, fill_value=i, dtype=float)
 
             # Compute density-based jitter safely
             if np.all(shap_vals == shap_vals[0]):
-                # All values identical → uniform small jitter
                 y_offsets = (np.random.rand(len(shap_vals)) - 0.5) * 2 * max_jitter * 0.1
             else:
                 kde = gaussian_kde(shap_vals, bw_method=kde_bw)
                 densities = kde(shap_vals)
-                densities = densities / densities.max()  # normalize to [0,1]
-                # Random vertical offsets proportional to density
+                densities = densities / densities.max()
                 y_offsets = (np.random.rand(len(shap_vals)) - 0.5) * 2 * densities * max_jitter
 
             y_final = base_y + y_offsets
+
+            # Assign coloraxis based on feature type
+            # Discrete features use coloraxis (now Plasma/norm), continuous use coloraxis2 (now Viridis/raw)
+            coloraxis = "coloraxis" if i in discrete_trace_indices else "coloraxis2"
+
+            # Show actual values in hover for discrete features
+            hover_value = feature_vals if uses_discrete_coloring and n_unique <= 10 else feature_vals_norm
 
             fig.add_trace(go.Scatter(
                 x=shap_vals,
                 y=y_final,
                 mode='markers',
                 marker=dict(
-                    size=6,
+                    size=1,
                     color=feature_vals_norm,
-                    colorscale='Viridis' if colorscale is None else colorscale,
-                    showscale=(i == 0),
-                    colorbar=dict(title="Norm. value", thickness=10) if i == 0 else None,
+                    showscale=True,
                     line=dict(width=0),
-                    coloraxis="coloraxis"
+                    coloraxis=coloraxis
                 ),
                 name=self.feature_names[feat_idx],
                 showlegend=False,
-            hovertemplate=f"<b>{self.feature_names[feat_idx]}</b><br>SHAP: %{{x:.3f}}<br>Value: %{{marker.color:.3f}}<extra></extra>"            ))
+                hovertemplate=f"<b>{self.feature_names[feat_idx]}</b><br>SHAP: %{{x:.3f}}<br>Value: %{{marker.color}}<extra></extra>"
+            ))
 
         fig.update_yaxes(
             tickmode="array",
@@ -189,10 +262,62 @@ class PlotlySHAPVisualizer:
             range=[-1, len(indices)]
         )
 
+        # Build layout with dual coloraxes
+        has_discrete = len(discrete_trace_indices) > 0
+        has_continuous = len(continuous_trace_indices) > 0
+
+        layout_updates = {}
+
+        if has_discrete:
+            # Configure coloraxis for discrete features - shows RAW values
+            layout_updates['coloraxis'] = {
+                'colorbar': {
+                    'title': 'Raw value',
+                    'x': 0.7,
+                    'y': 0.0,
+                    'xanchor': 'center',
+                    'yanchor': 'bottom',
+                    'thickness': 14,
+                    'len': 0.7
+                },
+                'colorscale': colorscale if colorscale is not None else 'Viridis'
+            }
+            # Add tick configuration for first discrete feature
+            unique_vals, n_unique = first_discrete_info
+            layout_updates['coloraxis']['colorbar'].update({
+                'tickmode': 'array',
+                'tickvals': list(np.linspace(0, 1, n_unique)),
+                'ticktext': [str(v) for v in unique_vals]
+            })
+
+        if has_continuous:
+            # Configure coloraxis2 for continuous/binary features - shows NORMALIZED values
+            # Use provided colorscale_continuous or reverse of colorscale
+            norm_colorscale = colorscale_continuous
+            if norm_colorscale is None:
+                if colorscale is not None:
+                    norm_colorscale = colorscale[::-1]
+                else:
+                    norm_colorscale = 'Viridis'
+            layout_updates['coloraxis2'] = {
+                'cmin': 0,
+                'cmax': 1,
+                'colorbar': {
+                    'title': 'Norm. value',
+                    'x': 0.8,
+                    'y': 0.0,
+                    'xanchor': 'left',
+                    'yanchor': 'bottom',
+                    'thickness': 14,
+                    'len': 0.7
+                },
+                'colorscale': norm_colorscale
+            }
 
         fig.update_layout(
             xaxis_title="SHAP value",
-            hovermode='closest'
+            hovermode='closest',
+            **layout_updates
         )
 
         return fig
