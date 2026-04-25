@@ -15,9 +15,6 @@ import time
 import os
 import numpy as np
 
-apikeys= [
-    
-    ]
 
 
 CHROMOSOME_SIZES = {
@@ -165,8 +162,8 @@ if __name__ == "__main__":
     OUTDIR = f"AGTensors{ONT}"
 
 
-    apikey= "AIzaSyDy_lIPVRv4Nh9DvVdMWVSd1-F16Ycf2-4"
-    apikey2 = "AIzaSyCR3zcWFglP8m23Jnw0Ox6osoKIthZbO68"
+    apikey = os.environ['AGAPIKEY']
+
     
     dna_model = dna_client.create(apikey)
 

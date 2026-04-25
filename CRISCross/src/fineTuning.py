@@ -14,7 +14,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import multiprocessing.util
 import collections
 from typing import Dict, List, Tuple
-from src.models import CRISPROfft, CnnCRISPR, CRISCross, CrisprIP
+from src.models import CRISCross
 from src.Datasets import MATCH_ROW_NUMBER1, MyDataModule, EPI_FEATURES, GenomicDataModule
 import json
 from torchmetrics import Metric
@@ -58,36 +58,13 @@ class PLCRISPRWrapper(pl.LightningModule):
 
 
         if model_type.lower() == "crisprofft":
-            self.model = CRISPROfft(
-                vocab_size=len(MATCH_ROW_NUMBER1), 
-                dropout=dropout, 
-                context_layers=context_layers,
-                embed_size=embed_size,
-                hidden_dim=hidden_dim, 
-                num_epi=num_epi,
-                output_size=self.output_size,
-                windowsize=windowsize,
-                merge=merge
-                )
+            raise NotImplementedError()
         elif model_type.lower() == "cnncrispr":
-            self.model = CnnCRISPR(len(MATCH_ROW_NUMBER1), 
-                embed_size, 
-                dropout=dropout, 
-                context_layers=context_layers, 
-                hidden_dim=hidden_dim, 
-                num_epi=num_epi,
-                output_size=self.output_size,
-                windowsize=windowsize,
-                merge=merge
-                )
+            raise NotImplementedError()
+
         elif model_type.lower() == "crisprip":
-            self.model = CrisprIP(
-                dropout=dropout, 
-                num_epi=num_epi,
-                output_size=self.output_size,
-                windowsize=windowsize,
-                merge=merge
-                )
+            raise NotImplementedError()
+
         elif model_type.lower() == "crosscrispr":
             self.model = CRISCross(
                 vocab_size=5,
