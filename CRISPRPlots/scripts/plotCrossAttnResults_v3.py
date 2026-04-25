@@ -2,10 +2,12 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 from scipy.stats import wilcoxon
-from plotly_template import COLORS, WIDTH, PT8, PT6, PT7
+from plotly_template import COLORS, WIDTH, PT8, PT6, PT7, rgb_to_rgba
 from statsmodels.stats.multitest import multipletests
 from plotly.subplots import make_subplots
 import numpy as np
+from plotCrossAttnResults_v3 import add_significance_brackets
+
 
 NAME_FIX = {
     "EX": "Ex",
@@ -377,7 +379,7 @@ def make_figure1(agg_npdf, agg_pdf_23, abl_df, wilcoxon_fig1, wilcoxon_abl):
         category_orders={"model": ["CRISPert", "CRISCross"]},
         color_discrete_map={
             "No pretraining": COLORS["white"],
-            "Pretraining":    COLORS["jaxgold"],
+            "Pretraining":    COLORS["seagrey"],
         },
     )
     for trace in fig_npdf.data:
@@ -386,7 +388,7 @@ def make_figure1(agg_npdf, agg_pdf_23, abl_df, wilcoxon_fig1, wilcoxon_abl):
 
     # ── Panel b: 23 nt, Base vs Ex vs AG (go.Bar to preserve x alignment) ─
     mode_colors = {
-        "Base": COLORS["white"],
+        "Base": COLORS["seagrey"],
         "Ex":   COLORS["jaxpetrol"],
         "AG":   COLORS["jaxgold"],
     }
@@ -403,6 +405,7 @@ def make_figure1(agg_npdf, agg_pdf_23, abl_df, wilcoxon_fig1, wilcoxon_abl):
                 marker=dict(color=mode_colors[mode_name]),
                 showlegend=False,
                 legendgroup=f"panel_b_{mode_name}",
+                width=0.4
             ),
             row=1, col=2,
         )
@@ -410,9 +413,9 @@ def make_figure1(agg_npdf, agg_pdf_23, abl_df, wilcoxon_fig1, wilcoxon_abl):
     # ── Panel c: ablation – distinct grey shades per bar ─────────────────
     abl_modes = ["AG", "-ATAC", "-Histone"]
     abl_colors = {
-        "AG":       COLORS["seagrey"],   # darkest – the reference
-        "-ATAC":    "#b2bec3",           # medium grey
-        "-Histone": "#dfe6e9",           # lightest grey
+        "AG":       COLORS["jaxgold"],   # darkest – the reference
+        "-ATAC":    rgb_to_rgba(COLORS["jaxgold"], 0.6),           # medium grey
+        "-Histone": rgb_to_rgba(COLORS["jaxgold"], 0.3),           # lightest grey
     }
     for abl_mode in abl_modes:
         abl_row = abl_df[abl_df["mode"] == abl_mode]
@@ -426,6 +429,7 @@ def make_figure1(agg_npdf, agg_pdf_23, abl_df, wilcoxon_fig1, wilcoxon_abl):
                 marker=dict(color=abl_colors[abl_mode]),
                 showlegend=False,
                 legendgroup=f"panel_c_{abl_mode}",
+                width=0.4
             ),
             row=1, col=3,
         )
@@ -481,8 +485,8 @@ def make_figure1(agg_npdf, agg_pdf_23, abl_df, wilcoxon_fig1, wilcoxon_abl):
         y_max_b = agg_pdf_23["mean"].max()
         add_significance_brackets(
             fig, comps_b,
-            y_start=y_max_b + 0.02,
-            y_step=0.016,
+            y_start=y_max_b + 0.2,
+            y_step=0.1,
             row=1, col=2, ncols=3,
         )
 
@@ -501,8 +505,8 @@ def make_figure1(agg_npdf, agg_pdf_23, abl_df, wilcoxon_fig1, wilcoxon_abl):
         y_max_c = abl_df["mean"].max()
         add_significance_brackets(
             fig, comps_c,
-            y_start=y_max_c + 0.02,
-            y_step=0.016,
+            y_start=y_max_c + 0.2,
+            y_step=0.1,
             row=1, col=3, ncols=3,
         )
 
@@ -522,8 +526,8 @@ def make_figure1(agg_npdf, agg_pdf_23, abl_df, wilcoxon_fig1, wilcoxon_abl):
     fig.update_xaxes(title=dict(text=None))
     fig.update_yaxes(title=dict(text="AUC-PR"))
     fig.update_yaxes(range=[0, 1.15],  row=1, col=1)
-    fig.update_yaxes(range=[0.7, 0.92], row=1, col=2)
-    fig.update_yaxes(range=[0.7, 0.92], row=1, col=3)
+    fig.update_yaxes(range=[0, 1.15], row=1, col=2)
+    fig.update_yaxes(range=[0, 1.15], row=1, col=3)
 
     _add_panel_labels(fig, [("a", -0.04), ("b", 0.34), ("c", 0.70)], y=0.99)
 
@@ -548,12 +552,22 @@ def make_figure2(agg_pdf, wilcoxon_window_df):
     c  AG model        (AlphaGenome)
     """
     custom_colors = {
-        "23":  COLORS["jaxgold"],
-        "128": COLORS["white"],
-        "512": COLORS["jaxpetrol"],
+        "AG":  COLORS["jaxgold"],
+        "Base": COLORS["seagrey"],
+        "Ex": COLORS["jaxpetrol"],
     }
+    shade = {
+        "23": 1,
+        "128": 0.66,
+        "512": 0.33
+    }
+    
     window_order = ["23", "128", "512"]   # categorical strings
     epi_modes = ["Base", "Ex", "AG"]
+    for epi_mode in epi_modes:
+        for window in window_order:
+            s = shade[window]
+            custom_colors[f"{epi_mode}-{window}"] = rgb_to_rgba(custom_colors[epi_mode], s)
     mode_labels = {
         "Base": "Sequence only",
         "Ex":   "Experimental",
@@ -587,9 +601,10 @@ def make_figure2(agg_pdf, wilcoxon_window_df):
                     x=[ws],
                     y=ws_row["mean"].values,
                     name=f"{ws} nt",
-                    marker=dict(color=custom_colors[ws]),
+                    marker=dict(color=custom_colors[f"{mode}-{ws}"]),
+                    width=0.4,
                     legendgroup=ws,
-                    showlegend=(col_idx == 1),  # legend entry once only
+                    showlegend=False,  # legend entry once only
                 ),
                 row=1, col=col_idx,
             )
@@ -618,7 +633,7 @@ def make_figure2(agg_pdf, wilcoxon_window_df):
                 y_max = mode_data["mean"].max()
                 add_significance_brackets(
                     fig, comps,
-                    y_start=y_max + 0.02,
+                    y_start=y_max + 0.03,
                     y_step=0.010,
                     row=1, col=col_idx, ncols=3,
                 )
@@ -644,7 +659,7 @@ def make_figure2(agg_pdf, wilcoxon_window_df):
         template="simple_white_custom",
         height=300, width=WIDTH,
         bargap=0.3,
-        margin=dict(r=90, t=45),
+        margin=dict(r=45, t=45),
         legend=dict(
             title=dict(text="Context size"),
             x=1.02, y=0.5,

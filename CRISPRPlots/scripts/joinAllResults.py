@@ -70,7 +70,7 @@ def main():
         axis=1
     )
     df1["mode"] = df1["mode"].apply(lambda x: x if "abl" not in x else "-Histone" if "Histone" in x else "-ATAC")
-    df = pd.concat((df1, df2))
+    df = pd.concat((df1, df2, df3))
     df["pretrain"] = df["mode"].apply(lambda x: not("NoPretrain" in x or "no pretrain" in x))
     df = df.sort_values(["seed", "split"])
 

@@ -4,12 +4,70 @@ from scipy.stats import wilcoxon, mannwhitneyu
 import plotly.express as px
 from plotly_template import COLORS, WIDTH, SINGLE_COL, PT6
 import plotly.graph_objects as go
-from helpers import add_bar_values, add_stars_with_stripes, calc_sig
+from helpers import add_bar_values, calc_sig
 from plotly.subplots import make_subplots
 import numpy as np
 from itertools import combinations
 
 
+def add_significance_brackets(
+    fig,
+    comparisons,
+    y_start,
+    y_step,
+    row=1,
+    col=1,
+    ncols=3,
+    tick_frac=0.35,
+    font_size_stars=12,
+):
+    """
+    Draw stacked horizontal significance brackets above grouped bars.
+    """
+    idx = (row - 1) * ncols + col
+    xref = "x" if idx == 1 else f"x{idx}"
+    yref = "y" if idx == 1 else f"y{idx}"
+    tick_h = y_step * tick_frac
+
+    sorted_comps = sorted(comparisons, key=lambda c: abs(c[1] - c[0]))
+
+    for i, (x0, x1, label) in enumerate(sorted_comps):
+        y = y_start + i * y_step
+
+        fig.add_shape(
+            type="line", x0=x0, x1=x1, y0=y, y1=y,
+            xref=xref, yref=yref,
+            line=dict(color="black", width=1),
+        )
+        fig.add_shape(
+            type="line", x0=x0, x1=x0, y0=y - tick_h, y1=y,
+            xref=xref, yref=yref,
+            line=dict(color="black", width=1),
+        )
+        fig.add_shape(
+            type="line", x0=x1, x1=x1, y0=y - tick_h, y1=y,
+            xref=xref, yref=yref,
+            line=dict(color="black", width=1),
+        )
+        is_stars = "*" in label
+        fig.add_annotation(
+            x=(x0 + x1) / 2, y=y,
+            yanchor="bottom", xanchor="center",
+            text=label, showarrow=False,
+            xref=xref, yref=yref,
+            font=dict(size=font_size_stars if is_stars else PT6),
+        )
+
+
+def stars_label(p):
+    """Returns star string or 'n.s.' – always produces a label."""
+    if p < 0.001:
+        return "***"
+    elif p < 0.01:
+        return "**"
+    elif p < 0.05:
+        return "*"
+    return "n.s."
 
 
 def main():
@@ -31,7 +89,6 @@ def main():
 
 
     df["pretrain strategy"] = df["mode"].apply(lambda x: "CRISPRAT" if x.split("-")[0] == "Arti" and "-Epi" in x else "CRISPRAT+Epi" if x.split("-")[0] == "Arti" and "+Epi" in x else "CRISPert")
-    breakpoint()
     datasets = ["T-Cell", "K562"]
     res_dfs = []
     for dataset in datasets:
@@ -43,7 +100,6 @@ def main():
         for s1, s2 in strategy_pairs:
             df1 = df[(df["pretrain strategy"] == s1) & (df["dataset"] == dataset)]["AUCPR"]
             df2 = df[(df["pretrain strategy"] == s2) & (df["dataset"] == dataset)]["AUCPR"]
-            breakpoint()
             if len(df1) and len(df2):
                 res = wilcoxon(df1, df2)
                 pvals.append(res.pvalue)
@@ -102,9 +158,14 @@ def main():
         if anno.text.startswith("pretrain"):
             anno.update(y=anno.y+0.15)
     cmap = {
-        "CRISPert": COLORS["jaxpetrol"],
+        "CRISPert": COLORS["seagrey"],
         "CRISPRAT": COLORS["jaxgold"],
-        "CRISPRAT+Epi": COLORS["jaxgold"],
+        "CRISPRAT+Epi": COLORS["seagrey"],
+    }
+    hatch_pattern = {
+        "CRISPert": None,
+        "CRISPRAT": "/",
+        "CRISPRAT+Epi": "/",
     }
     for col_index, dataset in enumerate(datasets, start=1):
         df_sub = df[df["dataset"] == dataset]
@@ -118,7 +179,11 @@ def main():
                         y=df_ws_p["mean"],
                         name=f"{ws}",
                         #error_y=dict(type="data", array=df_ws["std"]),
-                        marker=dict(color=cmap[pretrain_strat], line=dict(color="black", width=1)),
+                        marker=dict(
+                            color=COLORS["jaxgold"] if "Epi" in pretrain_strat else COLORS["seagrey"],
+                            line=dict(color="black", width=1),
+                            pattern=dict(shape=hatch_pattern[pretrain_strat] or "")
+                        ),
                         showlegend=False,
                         width=0.4
                     ),
@@ -126,24 +191,41 @@ def main():
                     row=col_index
                 )
     pcdf["Feature"] = pcdf["mode"].apply(lambda x: "Sequence &<br>ATAC-seq" if "+AG" in x else "Sequence")
-    fig.add_trace(
-        go.Bar(
-            x=pcdf["Feature"],
-            y=pcdf["mean"],
-            #error_y=dict(type="data", array=pcdf["std"]),
-            marker=dict(color=cmap["CRISPRAT"], line=dict(color="black", width=1)),
-            showlegend=False,
-            width=0.4
-        ),
-        col=1,
-        row=3
-    )  
+    # Color based on x-axis value: ATAC-seq → jaxgold, else → seagrey
+    # CRISPRAT trained bars (the ATAC-seq one) should have lines pattern
+    def get_bar_color(feature):
+        if "ATAC-seq" in feature:
+            return COLORS["jaxgold"]
+        return COLORS["seagrey"]
+
+
+    for _, row_pcdf in pcdf.iterrows():
+        feature = row_pcdf["Feature"]
+        fig.add_trace(
+            go.Bar(
+                x=[feature],
+                y=[row_pcdf["mean"]],
+                marker=dict(
+                    color=get_bar_color(feature),
+                    line=dict(color="black", width=1),
+                    pattern=dict(shape="/")
+                ),
+                showlegend=False,
+                width=0.4
+            ),
+            col=1,
+            row=3
+        )  
                 
     fig.add_trace(
         go.Bar(
             x=[None],
             y=[None],
-            marker=dict(color=cmap["CRISPert"], line=dict(color="black", width=1)),
+            marker=dict(
+                color=COLORS["black"],
+                line=dict(color="black", width=1),
+                pattern=dict(shape=hatch_pattern["CRISPert"] or "")
+            ),
             name="Pretraining on<br>T-cell dataset"
 
         )
@@ -152,7 +234,11 @@ def main():
         go.Bar(
             x=[None],
             y=[None],
-            marker=dict(color=cmap["CRISPRAT"], line=dict(color="black", width=1)),
+            marker=dict(
+                color=COLORS["black"],
+                line=dict(color="black", width=1),
+                pattern=dict(shape=hatch_pattern["CRISPRAT"] or "")
+            ),
             name="CRISPRAT"
 
         )
@@ -180,21 +266,89 @@ def main():
         categoryarray=cros_cell_order,
             tickvals=cros_cell_order,                  # original values
         col=1,
-        row=3
+        row=3,
     )
     fig.update_traces(error_y=dict(thickness=1))
 
     tcell_df=df[df["dataset"] == "T-Cell"]
     sub_res_df = results_df[(results_df["Strategy 2"] == "CRISPert") | (results_df["Strategy 1"] == "CRISPert")]
-    add_stars_with_stripes(sub_res_df[sub_res_df["test dataset"] == "T-Cell"], strategy_order=x_order, tcell_df=df[df["dataset"] == "T-Cell"], fig=fig, subplot_idx=1, space_fac=1.1)
-    add_stars_with_stripes(sub_res_df[sub_res_df["test dataset"] == "K562"], strategy_order=x_order[:2], tcell_df=df[df["dataset"] == "K562"], fig=fig, subplot_idx=2)
-    #add_stars_with_stripes(results_df[results_df["test dataset"] == "K562"], strategy_order=x_order[:2], tcell_df=df[df["dataset"] == "K562"], fig=fig, subplot_idx=2)
+    tcell_results = sub_res_df[sub_res_df["test dataset"] == "T-Cell"]
+
+    # Build comparisons for row 1 (T-Cell)
+    strategy_to_x = {s: i for i, s in enumerate(x_order)}
+    comps_row1 = []
+    for _, row in tcell_results.iterrows():
+        s1 = row["Strategy 1"]
+        s2 = row["Strategy 2"]
+        pval = row["padj"]
+        if np.isnan(pval):
+            continue
+        label = stars_label(pval)
+        x0 = strategy_to_x[s1]
+        x1 = strategy_to_x[s2]
+        comps_row1.append((x0, x1, label))
+
+    if comps_row1:
+        y_max_row1 = tcell_df["mean"].max() 
+        add_significance_brackets(
+            fig, comps_row1,
+            y_start=y_max_row1 + 0.3,
+            y_step=0.05,
+            row=1, col=1, ncols=1,
+        )
+
+    k562_df = df[df["dataset"] == "K562"]
+    k562_results = sub_res_df[sub_res_df["test dataset"] == "K562"]
+    comps_row2 = []
+    for _, row in k562_results.iterrows():
+        s1 = row["Strategy 1"]
+        s2 = row["Strategy 2"]
+        pval = row["padj"]
+        if np.isnan(pval):
+            continue
+        label = stars_label(pval)
+        x0 = strategy_to_x[s1]
+        x1 = strategy_to_x[s2]
+        comps_row2.append((x0, x1, label))
+
+    if comps_row2:
+        y_max_row2 = k562_df["mean"].max() 
+        add_significance_brackets(
+            fig, comps_row2,
+            y_start=y_max_row2 + 0.26,
+            y_step=0.05,
+            row=2, col=1, ncols=1,
+        )
+
     add_bar_values(fig, tcell_df, modes=x_order, col=1, row=1, x_val="pretrain strategy",)
-    tcell_df=df[df["dataset"] == "K562"]
-    add_bar_values(fig, tcell_df, modes=x_order, col=1, row=2, x_val="pretrain strategy",)
-    
-    sub_res_df = results_df[(results_df["Strategy 2"] == "CRISPRAT") & (results_df["Strategy 1"] == "CRISPRAT")]
-    add_stars_with_stripes(sub_res_df, strategy_order=[c.replace("<br>", " ") for c in cros_cell_order], tcell_df=pcdf, fig=fig, subplot_idx=3, strategy_col_prefix="features", space_fac=1.1)
+    add_bar_values(fig, k562_df, modes=x_order, col=1, row=2, x_val="pretrain strategy",)
+
+    # Row 3: Cross cell type comparison (Sequence vs Sequence & ATAC-seq)
+    cross_cell_results = results_df[(results_df["Strategy 2"] == "CRISPRAT") & (results_df["Strategy 1"] == "CRISPRAT")]
+    feature_to_x = {s: i for i, s in enumerate(cros_cell_order)}
+    comps_row3 = []
+    for _, row in cross_cell_results.iterrows():
+        s1 = row["features 1"]
+        s2 = row["features 2"]
+        s1 = 'Sequence &<br>ATAC-seq' if "ATAC" in s1 else s1
+        s2 = 'Sequence &<br>ATAC-seq' if "ATAC" in s2 else s2
+        pval = row["padj"]
+        if np.isnan(pval):
+            continue
+        label = stars_label(pval)
+        x0 = feature_to_x[s1]
+        x1 = feature_to_x[s2]
+        comps_row3.append((x0, x1, label))
+
+    if comps_row3:
+        y_max_row3 = pcdf["mean"].max() 
+        add_significance_brackets(
+            fig, comps_row3,
+            y_start=y_max_row3 + 0.3,
+            y_step=0.05,
+            row=3, col=1, ncols=1,
+        )
+
     add_bar_values(fig, pcdf, modes=cros_cell_order, col=1, row=3, x_val="Feature")
 
 
@@ -207,6 +361,7 @@ def main():
         legend=dict(orientation="h", y=-0.05)
     )
     fig.update_yaxes(title_text="AUC-PR", col=1,)
+    fig.update_yaxes(range=[0,1.15])
     fig.write_html("Figures/CRISPRAT.html")
     fig.write_image("Figures/CRISPRAT.svg", width=fig.layout.width, height=fig.layout.height)
     

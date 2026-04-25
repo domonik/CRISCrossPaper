@@ -3,7 +3,7 @@ import plotly.express as px
 import pandas as pd
 from scipy.stats import wilcoxon, mannwhitneyu
 from plotly_template import COLORS, WIDTH
-from plotCrossAttnResults import add_bar_values
+from helpers import add_bar_values
 from statsmodels.stats.multitest import multipletests
 
 
@@ -17,7 +17,7 @@ NAME_FIX = {
 }
 custom_colors = {
         'AlphaGenome': COLORS['jaxgold'],
-        'Sequence only': COLORS['white'],
+        'Sequence only': COLORS['seagrey'],
         'Experimental': COLORS['jaxpetrol']
     }   
 
@@ -105,7 +105,7 @@ def main(df):
 
 
 if __name__ == "__main__":
-    file = "ex_vs_base.csv"
+    file = "../Results/ex_vs_base.csv"
     df1 = pd.read_csv(file)
     df1 = df1.rename(
         {
@@ -120,7 +120,7 @@ if __name__ == "__main__":
         {"auprc": "AUCPR"}, axis=1
     )
     
-    file2 = "AG_vs_base.csv"
+    file2 = "../Results/AG_vs_base.csv"
     df2 = pd.read_csv(file2)
     df2 = df2.rename(
         {

@@ -2,9 +2,10 @@ import pandas as pd
 from statsmodels.stats.multitest import multipletests
 from scipy.stats import wilcoxon
 import plotly.express as px
-from plotly_template import COLORS, WIDTH, SINGLE_COL
+from plotly_template import COLORS, WIDTH, SINGLE_COL, PT6
 import plotly.graph_objects as go
-from helpers import add_bar_values, add_stars
+from helpers import add_bar_values
+from plotCrossAttnResults_v3 import add_significance_brackets
 
 def calc_sig(pdf, base_model_stats):
     wilcoxon_results = []
@@ -37,18 +38,35 @@ def calc_sig(pdf, base_model_stats):
     return wilcoxon_df
 
 
+def stars_label(p):
+    """Returns star string or 'n.s.'."""
+    if p < 0.001:
+        return "***"
+    elif p < 0.01:
+        return "**"
+    elif p < 0.05:
+        return "*"
+    return "n.s."
+
+epimap = {
+    "Baseline": "Baseline",
+    "AG": "AlphaGenome",
+    "EX": "Experimental",
+}
 def main(tsv):
     df = pd.read_csv(tsv, sep="\t")
     df = df.groupby(["Epi", "split"])["AUCPR"].mean().reset_index()
+    df["Epi"] = df["Epi"].map(epimap)
     base_model = df[df["Epi"] == "Baseline"]
     wildf = calc_sig(df, base_model)
     mdf = df.groupby(["Epi"])["AUCPR"].agg(['mean', 'std']).reset_index()
     fig = go.Figure()
     cmap = {
-        "Baseline": COLORS["white"],
-        "AG": COLORS["jaxgold"],
-        "EX": COLORS["jaxpetrol"],
+        "Baseline": COLORS["seagrey"],
+        "AlphaGenome": COLORS["jaxgold"],
+        "Experimental": COLORS["jaxpetrol"],
     }
+    
     for _, row in mdf.iterrows():
         fig.add_bar(
             x=[row["Epi"]],
@@ -65,7 +83,7 @@ def main(tsv):
         height= 200,
         margin=dict(b=25, l=50)
     )
-    modes = ["Baseline", "EX", "AG"]
+    modes = ["Baseline", "Experimental", "AlphaGenome"]
     fig.update_xaxes(
         categoryorder="array",
         categoryarray=modes,
@@ -73,7 +91,25 @@ def main(tsv):
     )
     mdf["mode"] = mdf["Epi"]
     add_bar_values(fig, mdf, row=None, col=None, modes=modes)
-    add_stars(fig, wildf, mdf, modes=modes, x_col="Epi", col=None, row=None)
+
+    # Add significance brackets: EX and AG vs Baseline (x=0)
+    comps = []
+    for mode_name in ["Experimental", "AlphaGenome"]:
+        prow = wildf[wildf["Epi"] == mode_name]
+        if prow.empty:
+            continue
+        label = stars_label(prow["padj"].values[0])
+        x_test = modes.index(mode_name)
+        comps.append((0, x_test, label))  # Baseline is at x=0
+
+    if comps:
+        y_max = mdf["mean"].max()
+        add_significance_brackets(
+            fig, comps,
+            y_start=y_max + 0.02,
+            y_step=0.01,
+            row=1, col=1, ncols=1,
+        )
     fig.update_yaxes(range=[0.7, 0.8], title="AUC-PR")
     fig.write_html("Figures/TabPFNResults.html")
     fig.write_image("Figures/TabPFNResults.svg", width=fig.layout.width, height=fig.layout.height)
@@ -82,5 +118,5 @@ def main(tsv):
 
 if __name__ == "__main__":
     
-    file ="TabPFNResults.tsv"
+    file ="../Results/TabPFNResults.tsv"
     main(file)

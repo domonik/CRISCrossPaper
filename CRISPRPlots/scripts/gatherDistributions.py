@@ -62,6 +62,7 @@ FEATURES = ["EX_ATAC", "EX_H3K4me3", "ATAC", "H3K4me3"]
 def generate_data(tsv, outfile_postfix):
     df = pd.read_csv(tsv, sep="\t")
     indices = df[df.label == 1]["AlphagenomeIndex"].values
+    neg_indices = df[df.label == 0]["AlphagenomeIndex"].values
     mask = np.zeros(len(df))
     mask[indices] = 1
     full_values = np.zeros((10, WINDOW_SIZE))
@@ -87,13 +88,18 @@ def generate_data(tsv, outfile_postfix):
         
         for i in range(0, window_size, CHUNK_SIZE):
             cur_val = mmap[:, i:i+CHUNK_SIZE, feat_dim]
+               
             pos_val = cur_val[indices]
-            neg_val = cur_val[~indices]
+            neg_val = cur_val[neg_indices]
+            
+            
             p_mean = np.nanmean(pos_val, axis=0)
             p_median = np.nanmedian(pos_val, axis=0)
             p_q25 = np.nanquantile(pos_val,q=0.25, axis=0)
             p_q75 = np.nanquantile(pos_val,q=0.75, axis=0)
             p_std = np.nanstd(pos_val, axis=0)
+            
+            
 
             values[0, i:i+CHUNK_SIZE] = p_mean
             values[1, i:i+CHUNK_SIZE] = p_median
@@ -310,4 +316,4 @@ if __name__ == "__main__":
     tsv = "../CRISCross/datasets/TCellDatasetWithextendedSequencesAndIDs.tsv"
     outfile = "SummaryNumpyArray.npy"
     generate_data(tsv, outfile)
-    generate_window_stats(tsv)
+    generate_window_stats(tsv, n_cpus=128)

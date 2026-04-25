@@ -5,8 +5,12 @@ import glob
 import os 
 from plotly_template import COLORS, WIDTH
 import plotly.graph_objects as go
+import plotly.colors as pc
 
 
+def sample_colorscale(colorscale_name, n):
+    """Sample n evenly spaced colors from a named Plotly colorscale."""
+    return pc.sample_colorscale(colorscale_name, [i / (n - 1) for i in range(n)])
 
 feature_name_map = {
     # Mismatch patterns at each guide position
@@ -161,7 +165,8 @@ def main():
 
     # Define colorscale for continuous/binary features: jaxpetrol to jaxgold
     colorscale_norm = [[0, COLORS["jaxpetrol"]], [1, COLORS["jaxgold"]]]
-    colorscale = [COLORS["vikpurple"], COLORS["bufblue"], COLORS["miablue"], COLORS["seagreen"], COLORS["miaorange"], COLORS["bufred"], ]
+    #colorscale = [COLORS["vikpurple"], COLORS["bufblue"], COLORS["miablue"], COLORS["seagreen"], COLORS["miaorange"], COLORS["bufred"], ]
+    colorscale = sample_colorscale("Viridis", 6)
     use_features_renamed = [feature_name_map.get(f, f) for f in [
       "distance",
       "dG_CRISPRoff_Total",

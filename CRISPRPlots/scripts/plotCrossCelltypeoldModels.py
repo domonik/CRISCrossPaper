@@ -1,7 +1,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 from plotly_template import WIDTH, COLORS, SINGLE_COL, PT7
-from plotCrossAttnResults import add_bar_values
+from helpers import add_bar_values
 from plotly.subplots import make_subplots
 
 fixNames = {
@@ -22,8 +22,10 @@ fix_celltype = {
 
 def main():
     cols = ["K562"]
-    df = pd.read_csv("combined_cross_cell_results_3cell.csv")
-    file = "FinalSummary.tsv"
+    df = pd.read_csv("../Results/combined_cross_cell_results_3cell.csv")
+    origdf = pd.read_csv("../datasets/k562_deepcrispr_withCoords_hg38.csv")
+    baseline_random_chance = origdf["label"].mean()
+    file = "../Results/FinalSummary.tsv"
     df2 = pd.read_csv(file, sep="\t")
     agstring = "Sequence & AlphaGenome ATAC-seq"
 
@@ -47,12 +49,12 @@ def main():
     df = df.groupby(["name", "cell_type", "features"], as_index=False)["aucpr"].mean()   
     df = df.sort_values("aucpr")
     df["model"] = df["name"].map(fixNames)
-    print(df)
+
     for i, cell_type in enumerate(cols):
         sdf = df[df["cell_type"] == cell_type]
         for feat in ["Sequence only", agstring]:
             sdf2 = sdf[sdf["features"] == feat]
-            color = COLORS["jaxgold"] if "ATAC" in feat else COLORS["white"]
+            color = COLORS["jaxgold"] if "ATAC" in feat else COLORS["seagrey"]
             fig.add_trace(
                     go.Bar(
                         x=sdf2["model"],
@@ -74,6 +76,23 @@ def main():
         height=175,
         legend=dict(orientation="h", y=-0.25),
         margin=dict(r=20, b=10)
+        
+    )
+    fig.add_hline(
+        y=baseline_random_chance,
+        line=dict(dash="dash", color="black")
+    )
+    print(f"Random chance: {baseline_random_chance}")
+    fig.add_annotation(
+        text=f"{baseline_random_chance:.3f}",
+        showarrow=False,
+        x=1,
+        xanchor="right",
+        y=baseline_random_chance,
+        yanchor="bottom",
+        yref="y",
+        xref="x domain",
+        textangle=270
         
     )
     
