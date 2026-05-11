@@ -519,7 +519,7 @@ if __name__ == "__main__":
    
     base_cfg={
     "pytorch seed":42,
-    "model_name_or_path":"/work/dlclarge1/pargeter-CRISPR_off/CRISPert/checkpoints/pretrain_atac_seed42/hf_model", #update to actual path of pretrained model
+    "model_name_or_path":"CRISPert_pretrained_model/hf_model",
     "train_batch_size": 256,
     "val_batch_size": 1024,
     "test_batch_size": 256,
