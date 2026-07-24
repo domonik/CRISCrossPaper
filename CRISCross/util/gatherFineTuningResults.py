@@ -4,7 +4,15 @@ import pandas as pd
 from multiprocessing import Pool, Manager, cpu_count
 
 
-parent_log_dirs = {"AGvsEPI": "RUNlogs/FineTuningPaperLeaveOneOutFixed", "Ablation": "RUNlogs/FineTuningAblationLeaveOneOutOnlyOverlap", "CRISPRAT": "RUNlogs/ArtificialFineTunePaper/", "NoPretrain": "RUNlogs/FineTuningPaperNoPretrain", "CrossCellType": "RUNlogs/CrossCellTypeTest/"}
+parent_log_dirs = {"AGvsEPI": "RUNlogs/FineTuningPaperLeaveOneOutFixed", 
+                   "Ablation": "RUNlogs/FineTuningAblationLeaveOneOutOnlyOverlap", 
+                   "CRISPRAT": "RUNlogs/ArtificialFineTunePaper/", 
+                   "NoPretrain": "RUNlogs/FineTuningPaperNoPretrain", 
+                   "CrossCellType": "RUNlogs/CrossCellTypeTest/",
+                   "Shuffled": "RUNlogs/ShuffledAndWrongCellType", 
+                   "IPSC": "RUNlogs/CrossCellTypeTestIPSC",
+                   "CROSSCellMLM": "RUNlogs/CrossCellTypeTestAblation",
+                   "CRISPRATTANdK": "RUNlogs/ArtificialFineTunePaper/"}
 pretrain_dir = "PretrainingPaperFixed"
 all_runs_data = []
 
@@ -39,10 +47,18 @@ def process_run(args):
         return None
 
     # Get final test_auprc
+    test_metrics = {}
+
     if 'test_auprc' in ea.Tags()['scalars']:
         aucpr_events = ea.Scalars('test_auprc')
         final_aucpr = aucpr_events[-1].value
         final_epoch = aucpr_events[-1].step
+        # Collect all test_* metrics
+        for tag in ea.Tags()['scalars']:
+            if tag.startswith("test_"):
+                events = ea.Scalars(tag)
+                if len(events) > 0:
+                    test_metrics[tag] = events[-1].value
 
     else:
         final_aucpr = None
@@ -103,6 +119,7 @@ def process_run(args):
         'version': version,
         "nr_steps": best_step_fine
     }
+    run_data.update(test_metrics)
 
     run_data.update(hparams)
 
@@ -125,7 +142,10 @@ for comparison, parent_log_dir in parent_log_dirs.items():
                 results = pool.map(process_run, args)
         else:
             results = [process_run(run) for run in args]
-    results, full_val_rows_list = zip(*results)
+    try:
+        results, full_val_rows_list = zip(*results)
+    except ValueError:
+        breakpoint()
     for res in results:
         res["comparison"] = comparison
     all_runs_data += [r for r in results if r is not None]
@@ -141,8 +161,9 @@ df["num_epi"] = df["run"].str.split("_ue").str[-1].str.split("_").str[0]
 df["seed"] = df["run"].str.split("_seed").str[-1].str.split("_").str[0]
 df["split"] = df["run"].str.split("test_split").str[-1].str.split("/").str[0]
 df["mode"] = df["run"].str.split("/").str[0]
-df["dataset"] = df["run"].apply(lambda x: "K562" if "K562" in x else "Hek" if "Hek" in x else "T-Cell")
+df["dataset"] = df["run"].apply(lambda x: "K562" if "K562" in x else "Hek" if "Hek" in x  else "IPSC" if "IPSC" in x else "T-Cell")
 #df = df[~df["mode"].str.contains("FineTuning")]
+breakpoint()
 df[df["mode"] == "Arti-Ws512-Epi"]
 ft_df = df[df["mode"] == "Arti-Ws512+AG_ccFineTuning"]
 test_df = df[df["mode"] == "Arti-Ws512+AG_ccTesting"]

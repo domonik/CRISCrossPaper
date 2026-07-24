@@ -22,6 +22,7 @@ from torchmetrics.functional import spearman_corrcoef
 from src.pretrain import PreTrainModel, get_logger
 
 from torch.optim.lr_scheduler import LambdaLR
+from torchmetrics.classification import BinaryRecallAtFixedPrecision
 
 
 class SpearmanCorr(Metric):
@@ -117,6 +118,9 @@ class PLCRISPRWrapper(pl.LightningModule):
         self.train_spearman = SpearmanCorr()
         self.val_spearman = SpearmanCorr()
         self.test_spearman = SpearmanCorr()
+        self.recall90 = BinaryRecallAtFixedPrecision(
+            min_precision=0.90
+        )
     
     def forward(self, target_x, off_target_x, epi, strands):
         return self.model(target_x, off_target_x, strands, epi)
@@ -168,6 +172,10 @@ class PLCRISPRWrapper(pl.LightningModule):
         
         self.log("val_loss", loss, prog_bar=True)
         return loss
+    
+    def on_test_start(self):
+        self.test_preds = []
+        self.test_targets = []
 
     def test_step(self, batch, batch_idx):
         y, counts, strands = batch[3:]
@@ -175,6 +183,9 @@ class PLCRISPRWrapper(pl.LightningModule):
         
         # Update AUPRC metric
         self.test_auprc.update(preds, y.int())
+        self.test_preds.append(preds.detach().cpu())
+        self.test_targets.append(y.detach().cpu())
+        self.recall90.update(preds, y.int())
         if self.regression:
             preds = preds[y == 1]
             counts = counts[y == 1]
@@ -191,8 +202,24 @@ class PLCRISPRWrapper(pl.LightningModule):
             self.test_spearman.reset()
         auprc_val = self.test_auprc.compute()
         self.log("test_auprc", auprc_val, prog_bar=True)
+        recall90 = self.recall90.compute()
+        recall, precision = recall90
+        self.log("test_recall@90precision", recall)
+        self.log("test_precision@90precision", precision)
+        self.recall90.reset()
         self.auprc.reset()
-    
+        
+        preds = torch.cat(self.test_preds)
+        targets = torch.cat(self.test_targets)
+        ks = [10, 50, 100, 500, 1000]
+        for k in ks:
+            if len(preds) < k:
+                precision_at_k = torch.tensor(float("nan"))
+            idx = torch.argsort(preds, descending=True)[:k]
+
+            precision_at_k = targets[idx].float().mean()
+            self.log(f"test_precision@{k}", precision_at_k)
+        
     
     def on_validation_epoch_end(self):
         if self.regression:
@@ -302,7 +329,7 @@ def run_training(config):
             test_guides=run_settings.iloc[train_test_split]["test_set"], 
             exclude=run_settings.iloc[train_test_split]["exclude"],
             num_samples=batch_size*10, batch_size=batch_size, 
-            ag_dir="AGTensors3", 
+            ag_dir=config.get("epi_dir", "AGTensors3"), 
             embedding_type=embedding_type, 
             windowsize=windowsize,
             epi_features=config["epi_features"]
@@ -403,7 +430,15 @@ if __name__ == "__main__":
             "EX_H3K27me3",  
             "EX_H3K36me3",
         ]
-        epi_features = []
+        epi_features = [
+            "ATAC",
+            "H3K4me1",
+            "H3K4me3",
+            "H3K9me3",
+            "H3K27ac",
+            "H3K27me3",
+            "H3K36me3"
+            ]
         params = {
             "batch_size": 128,
             "context_layers": 3,
@@ -420,12 +455,12 @@ if __name__ == "__main__":
             "windowsize": 23,
             "merge": None, #"early",
             "model_type": "crosscrispr",
-            "chkpt": "RUNlogs/PretrainingArtificialPaper/test_split1/ctl3_bs1024_ws23_ue0_seed0_energyTrue_hash/run_/vv0/checkpoints/best_model.ckpt",
+            "chkpt": "RUNlogs/PretrainingPaperFixed/AG/test_split0/ctl3_bs512_ws23_ue7_seed0_hashe5da1f09f1/run_/vv0/checkpoints/last.ckpt",
             "accumulate_grad_batches": 2,
             #"dataset": "Hek293WithextendedSequences.tsv",
-            "run_settings": "RunSettings.tsv",
-            "dataset": "WillsDatasetWithextendedSequencesAndIDs.tsv",
-            }
+            "run_settings": "runSettings/RunSettingsLeaveOneOut.tsv",
+            "dataset": "datasets/TCellDatasetWithextendedSequencesAndIDs.tsv",
+        }
     else:
         parser = argparse.ArgumentParser()
         parser.add_argument(

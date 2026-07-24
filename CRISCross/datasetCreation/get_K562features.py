@@ -9,13 +9,15 @@ from alphagenome.visualization import plot_components
 from alphagenome.data.genome import Interval
 from alphagenome.models.dna_client import OutputType
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import time
 import os
 import numpy as np
 
 
+apikey = os.environ['AGAPIKEY']
+
+dna_model = dna_client.create(apikey)
 
 CHROMOSOME_SIZES = {
     "chr1": 248956422,
@@ -50,10 +52,27 @@ CHROMOSOME_SIZES = {
 
 #WINDOW_SIZE = 2048
 #WINDOW_SIZE = 2**17
-WINDOW = 2**20
+WINDOW_SIZE = 2**14
 
-EXTRACT = 2**16         # 16,384
-FLANK = (WINDOW - EXTRACT) // 2
+HALF_WINDOW = WINDOW_SIZE // 2
+
+def create_interval_from_row(row):        # need to change column names depending on the input file
+    center = row['start'] + 11
+    return Interval(
+        chromosome=row['chr'],
+        start=center - HALF_WINDOW,
+        end=center + HALF_WINDOW,
+        strand=row['Strand']
+    )
+
+def is_valid_interval(chrom, start):
+    # Ensure 'chr' prefix
+    if not chrom.startswith("chr"):
+        chrom = "chr" + chrom
+    chrom_length = CHROMOSOME_SIZES.get(chrom)
+    if chrom_length is None:
+        return False
+    return 0 <= start < chrom_length and (start + WINDOW_SIZE) <= chrom_length
 
 
 
@@ -113,6 +132,7 @@ def extract_batch_features(rows_df, ontology_terms=['CL:0000624'], skipped_rows_
         row = row.copy()
         row['chr'] = chrom
 
+        interval = create_interval_from_row(row)
         intervals.append(interval)
         valid_rows.append(row)
     
@@ -129,86 +149,23 @@ def extract_batch_features(rows_df, ontology_terms=['CL:0000624'], skipped_rows_
     return batch_features
 
 
-
-def create_interval_from_row(row):       
-    return Interval(
-        chromosome=row['chrom'],
-        start=row["start"],
-        end=row["end"],
-    )
-
-
-import argparse
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--ontology",
-        required=True,
-        help="Ontology CURIE (e.g. CL:0000624)"
-    )
-    return parser.parse_args()
-
 if __name__ == "__main__":
     BATCH_SIZE = 100
-    FEATURE_LIST = ["ATAC", "DNASE", "CHIP_HISTONE", "RNA_SEQ"]
+    FEATURE_LIST = ["ATAC"]
 
     print("Extracting features for all intervals...")
     feature_list = []
-    organism = dna_client.Organism.HOMO_SAPIENS 
-    args = parse_args()
-    ONT = args.ontology
-    
-    OUTDIR = f"AGTensors{ONT}"
+    OUTDIR = "AGTensorsK562"
 
-
-    apikey = os.environ['AGAPIKEY']
-
-    
-    dna_model = dna_client.create(apikey)
-
-
+    df = pd.read_csv("tmpdatasets/K562WithWrongCoordsForOldPipeline.tsv", sep="\t")
     if not os.path.isdir(OUTDIR):
         os.mkdir(OUTDIR)
-        
-    rows = []
-    for chrom, chrom_size in CHROMOSOME_SIZES.items():
-        extract_start = 0
 
-        while extract_start < chrom_size:
-            extract_end = min(extract_start + EXTRACT, chrom_size)
-
-            # Proposed centered window
-            start = extract_start - FLANK
-            end = start + WINDOW
-
-            # Adjust for chromosome boundaries
-            if start < 0:
-                start = 0
-                end = min(WINDOW, chrom_size)
-
-            if end > chrom_size:
-                end = chrom_size
-                start = max(0, chrom_size - WINDOW)
-
-            rows.append({
-                "chrom": chrom,
-                "start": start,
-                "end": end,
-                "extract_start": extract_start,
-                "extract_end": extract_end
-            })
-
-            extract_start += EXTRACT
-
-    df = pd.DataFrame(rows)
-    df = (df.groupby(["chrom", "start", "end"], as_index=False).agg({"extract_start": min, "extract_end": max}))
 
     #df = df.sample(1000).reset_index()
     ag_info = pd.read_csv("../datasets/AlphagenomeInfo.csv", sep="\t")
-    ag_info = ag_info[ag_info["ontology_curie"] == ONT]
     ag_info = ag_info[ag_info.output_type.isin(FEATURE_LIST)]
-
+    #ag_info = ag_info[ag_info["biosample_name"].isin(df["Match in database"])]
     ag_info.loc[ag_info["output_type"] == "CHIP_HISTONE", "newTrackIndex"] = ag_info.loc[ag_info["output_type"] == "CHIP_HISTONE", "Target label"]
     ag_info.loc[ag_info["output_type"] == "RNA_SEQ", "newTrackIndex"] = ag_info.loc[ag_info["output_type"] == "RNA_SEQ", "strand"] + "_" + ag_info.loc[ag_info["output_type"] == "RNA_SEQ", "Assay title"]
 
@@ -225,6 +182,19 @@ if __name__ == "__main__":
 
     ag_info = ag_info[["biosample_name", "ontology_curie"]]
     ag_info = ag_info.drop_duplicates(["biosample_name", "ontology_curie"])
+    #df = df.merge(ag_info, left_on="Match in database", right_on="biosample_name", how="left")
+
+    df["Assembly"] = "hg38"
+    df["Query term"] = "K562"
+    df = df.drop_duplicates(["chr", "start", "end", "Strand", "Assembly", "Query term"])
+    df["AlphagenomeIndex"] = np.arange(len(df))
+
+
+
+    df["Intervals"] = df.apply(create_interval_from_row, axis=1)
+    df["ontology_curie"] = "EFO:0002067"
+
+
 
 
 
@@ -232,13 +202,12 @@ if __name__ == "__main__":
         output = outputs[0]
         sizes = {}
         for idx, row in TRACK_NAMES.iterrows():
-            for chrom, chrom_size in CHROMOSOME_SIZES.items():
-                filename = os.path.join(OUTDIR, f"{row['newTrackIndex']}_{chrom}.npy")
-                data = output.get(OutputType[row["output_type"]])
-                assert data is not None
-                shape = chrom_size, 1 
-                mmap_array = np.memmap(filename, dtype=np.float32, mode="w+", shape=shape)
-                mmap_array.flush()
+            filename = os.path.join(OUTDIR, f"{row['newTrackIndex']}.np")
+            data = output.get(OutputType[row["output_type"]])
+            assert data is not None
+            shape = len(df), WINDOW_SIZE // data.resolution, 1 
+            mmap_array = np.memmap(filename, dtype=np.float32, mode="w+", shape=shape)
+            mmap_array.flush()
 
 
     def fill_array(outputs, rows):
@@ -247,26 +216,20 @@ if __name__ == "__main__":
 
         for idx, track_row in TRACK_NAMES.iterrows():
             fdata = outputs[0].get(OutputType[track_row["output_type"]])
-            chrom = rows.iloc[0]["chrom"]
-            filename = os.path.join(OUTDIR, f"{track_row['newTrackIndex']}_{chrom}.npy")
-            shape = CHROMOSOME_SIZES[chrom], 1 
+
+            filename = os.path.join(OUTDIR, f"{track_row['newTrackIndex']}.np")
+            shape = len(df), WINDOW_SIZE // fdata.resolution, 1 
 
             mmap_array = np.memmap(filename, dtype=np.float32, mode='r+', shape=shape)
             for i, output in enumerate(outputs):
                 row = rows.iloc[i]
+                ag_index = row["AlphagenomeIndex"]
                 data = output.get(OutputType[track_row["output_type"]])
                 row_idx = fdata.metadata["name"].map(NAMETRACKNAMMPING)
-                if data.resolution != 1:
-                    data = data.change_resolution(resolution=1)
                 if not pd.isna(row_idx).any():
-                    if track_row["list_index"] >= data.values.shape[1]:
-                        breakpoint()
-                    vals = data.values[:, track_row["list_index"]][..., None]
+                    mmap_array[ag_index] = data.values[:, track_row["list_index"]][..., None]
                 else:
-                    vals = data.values
-                vals_offset_start = row["extract_start"] - row["start"]
-                vals_offset_end   = row["extract_end"] - row["start"]
-                mmap_array[row["extract_start"]:row["extract_end"]] = vals[vals_offset_start:vals_offset_end]
+                    mmap_array[ag_index] = data.values
             mmap_array.flush()
 
 
@@ -274,24 +237,31 @@ if __name__ == "__main__":
 
 
     idx = 0
-    df["Intervals"] = df.apply(create_interval_from_row, axis=1)
-    for (chrom), group in df.groupby(["chrom"]):
+    for (assembly, term), group in df.groupby(["Assembly", "ontology_curie"]):
         print("Extracting features in batches...")
-
         for batch_idx, start_idx in enumerate(range(0, len(group), BATCH_SIZE)):
             end_idx = min(start_idx + BATCH_SIZE, len(group))
             batch_df = group.iloc[start_idx:end_idx]
 
             print(f"Processing batch {start_idx} to {end_idx}...")
+            organism = dna_client.Organism.HOMO_SAPIENS if assembly == "hg38" else dna_client.Organism.MUS_MUSCULUS
             batch_output = run_batch_prediction(dna_model=dna_model, organism=organism, intervals=batch_df["Intervals"], 
-                                            ontology_terms=[ONT], OutputType=OutputType, max_retries=25, base_delay=5, max_delay=60)
+                                            ontology_terms=[batch_df["ontology_curie"].iloc[0]], OutputType=OutputType, max_retries=25, base_delay=5, max_delay=60)
         
             if idx == 0:
                 sizes = create_arrays(batch_output)
                 idx += 1
             fill_array(outputs=batch_output, rows=batch_df)
 
+    print(feature_list)
+    # # Convert to DataFrame
+    features_df = pd.DataFrame(feature_list)
 
+    print(features_df.columns)
+    print(features_df.shape)
+    # # Save the features
+    df.to_csv('tmpdatasets/AlphagenomeIndexK562.tsv', sep="\t")
+    TRACK_NAMES.to_csv("tmpdatasets/TrackNamesK562.tsv", sep="\t")
 
 
 

@@ -17,7 +17,7 @@ base_params = {
     "dropout": 0.2,
     "lr": 1e-4,
     "patience": 10,
-    "experiment": "CrossCellTypeTest",
+    "experiment": "CrossCellTypeTestAblation",
     "regression": False,
     "merge": "early",
     "model_type": "crosscrispr",
@@ -45,9 +45,9 @@ data_df = pd.DataFrame(data)
 data_df.to_csv(RUNSETTINGSTCELL, sep="\t")
 
 
-datasets = {"T_cell": "datasets/TCellDatasetWithCorrectCoords.tsv", "HEK293T": "Hek293WithextendedSequences.tsv", "K562": "datasets/K562WithIDs.tsv"}
+datasets = {"T_cell": "datasets/TCellDatasetWithCorrectCoords.tsv", "HEK293T": "Hek293WithextendedSequences.tsv", "K562": "../datasets/k562_deepcrispr_withCoords_hg38.csv"}
 
-k562 = pd.read_csv(datasets["K562"], sep="\t")
+k562 = pd.read_csv(datasets["K562"], sep=",")
 #k562["GuideID"] = k562["GuideID"] + "_k562"
 k562["epiDir"] = "AGTensorsEFO:0002067"
 
@@ -80,8 +80,6 @@ t_cell = pd.read_csv(datasets["T_cell"], sep="\t")
 t_cell = t_cell.drop(["extended_off_target"], axis=1)
 t_cell["GuideID"] = t_cell["GuideID"] + "_tcell"
 t_cell["epiDir"] = "AGTensorsCL:0000624"
-t_cell.to_csv("datasets/TCellWithEpidir.tsv", sep="\t", index=False)
-datasets["T_cell"] = "datasets/TCellWithEpidir.tsv"
 # Create directories for joined datasets and run settings
 joined_datasets_dir = "joined_datasets"
 run_settings_dir = "run_settings"
@@ -91,8 +89,10 @@ os.makedirs(run_settings_dir, exist_ok=True)
 seeds = [i * 42 for i in range(25)]
 
 CHKPTS = {
-    "Arti-Ws512-AG": os.path.join("RUNlogs/PretrainingArtificialPaperFixed/test_split1/ctl3_bs1024_ws512_ue0_seed0_energyTrue_hash/run_/vv1",   "checkpoints", "last.ckpt"),
-    "Arti-Ws512+AG": os.path.join("RUNlogs/PretrainingArtificialPaperAG2/test_split1/ctl3_bs1024_ws512_ue1_seed0_energyTrue_hash2/run_/vv1",  "checkpoints", "last.ckpt"),
+    "MLMFull-Ws512-AG": os.path.join("RUNlogs/PretrainingPaperCrossCellMLMNewScript/Sequence_TCellPlusK562/test_split0/ctl3_bs512_ws512_ue0_seed0_energyFalse_hash/run_/vv0",   "checkpoints", "last.ckpt"),
+    "MLMFull-Ws512+AG": os.path.join("RUNlogs/PretrainingPaperCrossCellMLMNewScript/ATAC_TCellPlusK562/test_split0/ctl3_bs512_ws512_ue1_seed0_energyFalse_hash2/run_/vv0",  "checkpoints", "last.ckpt"),
+    "MLMTCell-Ws512-AG": os.path.join("RUNlogs/PretrainingPaperCrossCellMLMNewScript/Sequence_TCell/test_split0/ctl3_bs512_ws512_ue0_seed0_energyFalse_hash/run_/vv0",  "checkpoints", "last.ckpt"),
+    "MLMTCell-Ws512+AG": os.path.join("RUNlogs/PretrainingPaperCrossCellMLMNewScript/ATAC_TCell/test_split0/ctl3_bs512_ws512_ue1_seed0_energyFalse_hash2/run_/vv0",  "checkpoints", "last.ckpt"),
 }
 
 
@@ -112,7 +112,7 @@ if __name__ == "__main__":
             params["merge"] = "early" if "+AG" in chkpt_key else None
             params["seed"] = [seed]
             params["split"] = 0
-            params["bw_dir"] = ["AGTensorsCL:0000624", "AGTensorsEFO:0002067", "AGTensorsEFO:0009747"]
+            params["bw_dir"] = ["AGTensorsCL:0000624", "AGTensorsEFO:0002067"]
             params["fit"] = True
             params["windowsize"] = ws
             params["run_settings"] = RUNSETTINGSTCELL
@@ -121,12 +121,7 @@ if __name__ == "__main__":
             num_epi = sum(EPI_FEATURES[key][-1] for key in params["epi_features"])
             params["num_epi"] = num_epi
             chkpt = CHKPTS[chkpt_key]
-            
-            stat_cache = chkpt.split("/run_")[0] if num_epi else None
-            if stat_cache is not None:
-                pass
-                #assert os.path.exists(stat_cache), f"Stat cache doesnt exist: {stat_cache}"
-            params["stat_cache_dir"] = stat_cache
+
 
             assert os.path.exists(chkpt), f"Checkpoint not found:\n{chkpt}"
             params["chkpt"] = chkpt
@@ -144,7 +139,7 @@ if __name__ == "__main__":
             test_params["dataset"] = datasets["K562"]  # Use the 80% test split file
             test_params["run_settings"] = RUNSETTINGSK562
             test_params["experiment"] = base_params["experiment"] + f"/{mode}_ccTesting/K562Test_seed{seed}"
-            test_params["bw_dir"] = ["AGTensorsCL:0000624", "AGTensorsEFO:0002067", "AGTensorsEFO:0009747"]
+            test_params["bw_dir"] = ["AGTensorsCL:0000624", "AGTensorsEFO:0002067"]
 
 
 
@@ -153,15 +148,15 @@ if __name__ == "__main__":
             idx += 1
 
     # Write to JSON
-    with open("configs/fineTuningCRISPRATAG.json", "w") as f:
+    with open("configs/fineTuningCRISPRATAblation.json", "w") as f:
         json.dump(fine_tune_configs, f, indent=2)
 
-    with open("configs/TestCRISPRATAG.json", "w") as f:
+    with open("configs/TestCRISPRATAblation.json", "w") as f:
         json.dump(test_configs, f, indent=2)
 
     print(
-        f"Wrote {len(fine_tune_configs)} configs to fineTuningCRISPRATAG.json"
+        f"Wrote {len(fine_tune_configs)} configs to fineTuningCRISPRATAblation.json"
     )
     print(
-        f"Wrote {len(test_configs)} configs to TestCRISPRATAG.json"
+        f"Wrote {len(test_configs)} configs to TestCRISPRATAblation.json"
     )

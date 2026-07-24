@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
-from torchmetrics.classification import BinaryAveragePrecision
+from torchmetrics.classification import BinaryAveragePrecision, BinaryRecallAtFixedPrecision
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, StochasticWeightAveraging
 import pandas as pd
@@ -19,7 +19,8 @@ from src.Datasets import MATCH_ROW_NUMBER1, MyDataModule, EPI_FEATURES, GenomicD
 import json
 from torchmetrics import Metric
 from torchmetrics.functional import spearman_corrcoef
-from src.pretrain import PreTrainModel, get_logger
+from src.pretrain import get_logger
+from src.pretrainArtificial import PreTrainModel
 
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -42,7 +43,7 @@ class SpearmanCorr(Metric):
 
 
 class PLCRISPRWrapper(pl.LightningModule):
-    def __init__(self, model_type, embed_size, context_layers, hidden_dim, num_epi, dropout, seed, windowsize, merge, lr=1e-4, borders = None):
+    def __init__(self, model_type, embed_size, context_layers, hidden_dim, num_epi, dropout, seed, windowsize, merge, lr=1e-4, borders = None, join_method="cross"):
         super().__init__()
         
         if borders is not None:
@@ -56,7 +57,6 @@ class PLCRISPRWrapper(pl.LightningModule):
             self.regression = False
 
 
-
         if model_type.lower() == "crisprofft":
             raise NotImplementedError()
         elif model_type.lower() == "cnncrispr":
@@ -64,7 +64,6 @@ class PLCRISPRWrapper(pl.LightningModule):
 
         elif model_type.lower() == "crisprip":
             raise NotImplementedError()
-
         elif model_type.lower() == "crosscrispr":
             self.model = CRISCross(
                 vocab_size=5,
@@ -74,7 +73,8 @@ class PLCRISPRWrapper(pl.LightningModule):
                 num_epi=num_epi,
                 output_size=self.output_size,
                 windowsize=windowsize,
-                merge=merge
+                merge=merge,
+                join_method=join_method
 
             )
 
@@ -90,6 +90,9 @@ class PLCRISPRWrapper(pl.LightningModule):
         self.lr = lr
         self.auprc = BinaryAveragePrecision()  # torchmetrics AUPRC
         self.test_auprc = BinaryAveragePrecision()
+        self.recall90 = BinaryRecallAtFixedPrecision(
+            min_precision=0.90
+        )
         self.train_spearman = SpearmanCorr()
         self.val_spearman = SpearmanCorr()
         self.test_spearman = SpearmanCorr()
@@ -145,6 +148,10 @@ class PLCRISPRWrapper(pl.LightningModule):
         
         self.log("val_loss", loss, prog_bar=True)
         return loss
+    
+    def on_test_start(self):
+        self.test_preds = []
+        self.test_targets = []
 
     def test_step(self, batch, batch_idx):
         y, counts, strands = batch[3:]
@@ -152,6 +159,11 @@ class PLCRISPRWrapper(pl.LightningModule):
         
         # Update AUPRC metric
         self.test_auprc.update(preds, y.int())
+        
+        self.test_preds.append(preds.detach().cpu())
+        self.test_targets.append(y.detach().cpu())
+        self.recall90.update(preds, y.int())
+        
         if self.regression:
             preds = preds[y == 1]
             counts = counts[y == 1]
@@ -169,6 +181,26 @@ class PLCRISPRWrapper(pl.LightningModule):
         auprc_val = self.test_auprc.compute()
         self.log("test_auprc", auprc_val, prog_bar=True)
         self.auprc.reset()
+        
+        recall90 = self.recall90.compute()
+        recall, precision = recall90
+        self.log("test_recall@90precision", recall)
+        self.log("test_precision@90precision", precision)
+        self.recall90.reset()
+        
+        preds = torch.cat(self.test_preds)
+        targets = torch.cat(self.test_targets)
+        self.preds = preds
+        ks = [5, 10, 25, 50, 100, 500, 1000]
+        for k in ks:
+            if len(preds) < k:
+                precision_at_k = torch.tensor(float("nan"))
+            else:
+                idx = torch.argsort(preds, descending=True)[:k]
+
+                precision_at_k = targets[idx].float().mean()
+                self.log(f"test_precision@{k}", precision_at_k)
+        
     
     
     def on_validation_epoch_end(self):
@@ -302,6 +334,7 @@ def run_training(config):
     )
     run_settings["test_set"] = run_settings["test_set"].apply(eval)
     run_settings["exclude"] = run_settings["exclude"].apply(eval)
+    join_method = config.get("join_method", "cross")
 
 
     if isinstance(seeds, int):
@@ -350,7 +383,8 @@ def run_training(config):
             seed=seed,
             borders=borders,
             windowsize=windowsize,
-            merge=merge
+            merge=merge,
+            join_method=join_method
 
         )
         if "chkpt" in config:
@@ -437,6 +471,11 @@ def run_training(config):
 
         if len(run_settings.iloc[train_test_split]["test_set"]):
             test_result = trainer.test(best_model, dm)
+            preds = best_model.preds.numpy()
+            test_set = df[df["GuideID"].isin(run_settings.iloc[train_test_split]["test_set"])]
+            test_set["predictions"] = preds
+            test_set.to_csv(os.path.join(logger.save_dir, "final_predictions.tsv"), sep="\t")
+            
 
 if __name__ == "__main__":
     import argparse

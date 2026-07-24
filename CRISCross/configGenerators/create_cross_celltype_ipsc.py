@@ -17,7 +17,7 @@ base_params = {
     "dropout": 0.2,
     "lr": 1e-4,
     "patience": 10,
-    "experiment": "CrossCellTypeTest",
+    "experiment": "CrossCellTypeTestIPSC",
     "regression": False,
     "merge": "early",
     "model_type": "crosscrispr",
@@ -36,22 +36,15 @@ epi_features = [
 
 RUNSETTINGSTCELL = "runSettings/RunSettingsFullTCell.tsv"
 
-data = {
-    "val_set": [None],
-    "test_set": [[]],
-    "exclude": [[]],
-}
-data_df = pd.DataFrame(data)
-data_df.to_csv(RUNSETTINGSTCELL, sep="\t")
 
 
-datasets = {"T_cell": "datasets/TCellDatasetWithCorrectCoords.tsv", "HEK293T": "Hek293WithextendedSequences.tsv", "K562": "datasets/K562WithIDs.tsv"}
+datasets = {"T_cell": "datasets/TCellDatasetWithCorrectCoords.tsv", "IPSCs": "../datasets/ipscs_dataset_invivo_full.csv"}
 
-k562 = pd.read_csv(datasets["K562"], sep="\t")
+ipsc = pd.read_csv(datasets["IPSCs"], sep=",")
 #k562["GuideID"] = k562["GuideID"] + "_k562"
-k562["epiDir"] = "AGTensorsEFO:0002067"
+ipsc["epiDir"] = "AGTensorsEFO:0009747"
 
-k562 = k562.rename(
+ipsc = ipsc.rename(
     {
         "sgRNA": "Guide_sequence",
         "chrom": "chr",
@@ -61,18 +54,18 @@ k562 = k562.rename(
     axis=1
 )
 
-k562["GuideID"] = pd.factorize(k562["Guide_sequence"])[0]
-k562.to_csv("datasets/K562WithEpidir.tsv", sep="\t", index=False)
-datasets["K562"] = "datasets/K562WithEpidir.tsv"
+ipsc["GuideID"] = pd.factorize(ipsc["Guide_sequence"])[0]
+ipsc.to_csv("datasets/IPScWithEpidir.tsv", sep="\t", index=False)
+datasets["IPSC"] = "datasets/IPScWithEpidir.tsv"
 
-RUNSETTINGSK562 = "runSettings/RunSettingsFullK562.tsv"
+RUNSETTINGSIPSC= "runSettings/RunSettingsFullIPSC.tsv"
 data = {
     "val_set": [[]],
-    "test_set": [k562["GuideID"].unique().tolist()],
+    "test_set": [ipsc["GuideID"].unique().tolist()],
     "exclude": [[]],
 }
 data_df = pd.DataFrame(data)
-data_df.to_csv(RUNSETTINGSK562, sep="\t")
+data_df.to_csv(RUNSETTINGSIPSC, sep="\t")
 
 
 # Load T_cell dataset
@@ -80,13 +73,8 @@ t_cell = pd.read_csv(datasets["T_cell"], sep="\t")
 t_cell = t_cell.drop(["extended_off_target"], axis=1)
 t_cell["GuideID"] = t_cell["GuideID"] + "_tcell"
 t_cell["epiDir"] = "AGTensorsCL:0000624"
-t_cell.to_csv("datasets/TCellWithEpidir.tsv", sep="\t", index=False)
-datasets["T_cell"] = "datasets/TCellWithEpidir.tsv"
 # Create directories for joined datasets and run settings
-joined_datasets_dir = "joined_datasets"
-run_settings_dir = "run_settings"
-os.makedirs(joined_datasets_dir, exist_ok=True)
-os.makedirs(run_settings_dir, exist_ok=True)
+
 
 seeds = [i * 42 for i in range(25)]
 
@@ -121,17 +109,12 @@ if __name__ == "__main__":
             num_epi = sum(EPI_FEATURES[key][-1] for key in params["epi_features"])
             params["num_epi"] = num_epi
             chkpt = CHKPTS[chkpt_key]
-            
-            stat_cache = chkpt.split("/run_")[0] if num_epi else None
-            if stat_cache is not None:
-                pass
-                #assert os.path.exists(stat_cache), f"Stat cache doesnt exist: {stat_cache}"
-            params["stat_cache_dir"] = stat_cache
+
 
             assert os.path.exists(chkpt), f"Checkpoint not found:\n{chkpt}"
             params["chkpt"] = chkpt
             mode = chkpt_key
-            params["experiment"] = base_params["experiment"] + f"/{mode}_ccFineTuning/{dataset_key}_K562Val_seed{seed}" 
+            params["experiment"] = base_params["experiment"] + f"/{mode}_ccFineTuning/{dataset_key}_IPSC_seed{seed}" 
             
             
             sparam = params.copy()
@@ -141,9 +124,9 @@ if __name__ == "__main__":
             test_params["seed"] = seed
             test_params["chkpt"] = os.path.join(base_dir, "run_/vv0/checkpoints/swa_model.ckpt")
             test_params["fit"] = False
-            test_params["dataset"] = datasets["K562"]  # Use the 80% test split file
-            test_params["run_settings"] = RUNSETTINGSK562
-            test_params["experiment"] = base_params["experiment"] + f"/{mode}_ccTesting/K562Test_seed{seed}"
+            test_params["dataset"] = datasets["IPSC"]  # Use the 80% test split file
+            test_params["run_settings"] = RUNSETTINGSIPSC
+            test_params["experiment"] = base_params["experiment"] + f"/{mode}_ccTesting/IPSCTest_seed{seed}"
             test_params["bw_dir"] = ["AGTensorsCL:0000624", "AGTensorsEFO:0002067", "AGTensorsEFO:0009747"]
 
 
@@ -153,15 +136,15 @@ if __name__ == "__main__":
             idx += 1
 
     # Write to JSON
-    with open("configs/fineTuningCRISPRATAG.json", "w") as f:
+    with open("configs/fineTuningCRISPRATAGIPSC.json", "w") as f:
         json.dump(fine_tune_configs, f, indent=2)
 
-    with open("configs/TestCRISPRATAG.json", "w") as f:
+    with open("configs/TestCRISPRATAGIPSC.json", "w") as f:
         json.dump(test_configs, f, indent=2)
 
     print(
-        f"Wrote {len(fine_tune_configs)} configs to fineTuningCRISPRATAG.json"
+        f"Wrote {len(fine_tune_configs)} configs to fineTuningCRISPRATAGIPSC.json"
     )
     print(
-        f"Wrote {len(test_configs)} configs to TestCRISPRATAG.json"
+        f"Wrote {len(test_configs)} configs to TestCRISPRATAGIPSC.json"
     )

@@ -19,7 +19,7 @@ base_params = {
     "regression": False,
     "windowsize": 512,
     "model_type": "crosscrispr",
-    "bw_dir": ["AGTensorsCL:0000624", "AGTensorsEFO:0002067"],
+    "bw_dir": ["AGTensorsCL:0000624"],
     "epi_mode": "np"
 }
 
@@ -38,7 +38,7 @@ seeds = [0]
 # Generate all combinations
 all_combinations = []
 l_40_combs = []
-for iteration, seed, epi_features, use_energy, ws in product(loop, seeds, epi_features_list, use_energy_list, window_sizes):
+for ws, iteration, seed, epi_features, use_energy in product(window_sizes, loop, seeds, epi_features_list, use_energy_list):
     params = base_params.copy()
     params["epi_features"] = epi_features
     params["use_energy"] = use_energy

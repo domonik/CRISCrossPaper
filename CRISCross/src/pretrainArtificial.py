@@ -49,7 +49,7 @@ def get_logger(config):
     return logger
 
 class PreTrainModel(pl.LightningModule):
-    def __init__(self, context_layers, hidden_dim, num_epi, dropout, seed, windowsize, merge,epi_weights, lr=1e-4, borders = None, use_energy=False):
+    def __init__(self, context_layers, hidden_dim, num_epi, dropout, seed, windowsize, merge,epi_weights, lr=1e-4, borders = None, use_energy=False, join_method= "cross"):
         super().__init__()
         
         if borders is not None:
@@ -63,6 +63,7 @@ class PreTrainModel(pl.LightningModule):
             self.regression = False
         self.use_energy = use_energy
         self.vocab_size = 5
+        print(f"joining using join method: {join_method}")
         self.model = CRISCross(
             vocab_size=self.vocab_size,
             dropout=dropout,
@@ -71,7 +72,8 @@ class PreTrainModel(pl.LightningModule):
             num_epi=num_epi,
             output_size=self.output_size,
             windowsize=windowsize,
-            merge=merge
+            merge=merge,
+            join_method=join_method
 
         )
         self.windowsize = windowsize
@@ -283,6 +285,7 @@ def run_pretraining(config):
     windowsize = config["windowsize"]
     merge = config["merge"]
     model_type = config["model_type"]
+    join_method = config.get("join_method", "cross")
 
     pl.seed_everything(seed,workers=True)
 
@@ -294,7 +297,7 @@ def run_pretraining(config):
         epi_features=epi_features,
         window_size=config["windowsize"],
         batch_size=config["batch_size"],
-        num_workers = 20,
+        num_workers = 15,
         num_samples=1000000,
         norm_epi=True if config["num_epi"] else False,
         use_energy=config["use_energy"],
@@ -311,7 +314,8 @@ def run_pretraining(config):
             windowsize=windowsize,
             merge=merge,
             epi_weights = epi_weights,
-            use_energy=config["use_energy"]
+            use_energy=config["use_energy"],
+            join_method=join_method
 
         )
 

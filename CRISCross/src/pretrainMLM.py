@@ -15,35 +15,32 @@ import multiprocessing.util
 import collections
 from typing import Dict, List, Tuple
 from src.models import CRISPROfft, CnnCRISPR, CRISCross
-from src.Datasets import MATCH_ROW_NUMBER1, MyDataModule, EPI_FEATURES, MAPPING, EPI_WEIGHTS
+from src.Datasets import MATCH_ROW_NUMBER1, GenomicDataModule, EPI_FEATURES, MAPPING, EPI_WEIGHTS
 import json
 from torchmetrics import Metric
 from torchmetrics.functional import spearman_corrcoef
 from torchmetrics.classification import MulticlassAveragePrecision
-from pytorch_lightning.strategies import DDPStrategy
-
 
 from torch.optim.lr_scheduler import LambdaLR
 import hashlib
+from pytorch_lightning.strategies import DDPStrategy
+
+
+mp.set_start_method("spawn", force=True)
 
 
 def short_hash(epi_features, length=6):
     # deterministic string representation
     s = ",".join(sorted(epi_features))
     h = hashlib.md5(s.encode()).hexdigest()
-    return h[:10]
+    return h[:length]
 
-def get_base(config):
+def get_logger(config):
     epi_hash = short_hash(config["epi_features"], config["num_epi"])
-    base_dir = f"RUNlogs/{config['experiment']}/test_split{config['split']}/ctl{config['context_layers']}_bs{config['batch_size']}_ws{config["windowsize"]}_ue{config['num_epi']}_seed{config['seed']}_hash{epi_hash}" 
+    base_dir = f"RUNlogs/{config['experiment']}/test_split{config['split']}/ctl{config['context_layers']}_bs{config['batch_size']}_ws{config["windowsize"]}_ue{config['num_epi']}_seed{config['seed']}_energy{config["use_energy"]}_hash{epi_hash}" 
     existing = os.listdir(os.path.join(base_dir, "run_")) if os.path.exists(base_dir) else []
     print(f"BASE DIR: {base_dir}")
     version = f"v{len(existing)}"
-    return base_dir, version
-    
-
-def get_logger(config):
-    base_dir, version = get_base(config)
     logger = TensorBoardLogger(
         save_dir=base_dir,   # your custom folder
         name=f"run_",
@@ -51,36 +48,8 @@ def get_logger(config):
     )   
     return logger
 
-
-def estimate_stats(loader):
-
-    for batch in loader:
-        _, _, epi, _, _ = batch  # epi: (B, L, F)
-
-        # move to CPU if needed
-        epi = epi.detach().cpu()
-
-        B, L, F = epi.shape
-        epi = epi.view(-1, F)  # (B*L, F)
-
-        if feature_sum is None:
-            feature_sum = epi.sum(dim=0)
-            feature_sq_sum = (epi ** 2).sum(dim=0)
-        else:
-            feature_sum += epi.sum(dim=0)
-            feature_sq_sum += (epi ** 2).sum(dim=0)
-
-        count += epi.shape[0]
-
-    mean = feature_sum / count
-    var = (feature_sq_sum / count) - mean**2
-    std = torch.sqrt(var)
-    return mean, var, std
-
-
-
 class PreTrainModel(pl.LightningModule):
-    def __init__(self, context_layers, hidden_dim, num_epi, dropout, seed, windowsize, merge,epi_weights, lr=1e-4, borders = None, ):
+    def __init__(self, context_layers, hidden_dim, num_epi, dropout, seed, windowsize, merge,epi_weights, lr=1e-4, borders = None, use_energy=False):
         super().__init__()
         
         if borders is not None:
@@ -92,9 +61,10 @@ class PreTrainModel(pl.LightningModule):
             self.criterion = nn.BCEWithLogitsLoss(reduction="none")
             self.output_size = 1
             self.regression = False
-
+        self.use_energy = use_energy
+        self.vocab_size = 5
         self.model = CRISCross(
-            vocab_size=5,
+            vocab_size=self.vocab_size,
             dropout=dropout,
             context_layers=context_layers,
             hidden_dim=hidden_dim,
@@ -126,19 +96,21 @@ class PreTrainModel(pl.LightningModule):
         self.max_idx = MAPPING.max()
         self.loss_fn = nn.CrossEntropyLoss(reduction="none")
         self.epi_loss_fn = nn.MSELoss(reduction="none")
+        self.energy_loss_fct = nn.MSELoss()
         self.per_nt_classifier = nn.Linear(hidden_dim, 25)
         self.per_nt_epi_head = nn.Linear(hidden_dim, num_epi)
         self.auprc = MulticlassAveragePrecision( num_classes=25)
+        self.train_auprc = MulticlassAveragePrecision( num_classes=25)
         self._first_batches_features = []
 
 
 
     
     def forward(self, target_x, off_target_x, epi, strands):
-        _, logits = self.model(target_x, off_target_x, strands, epi, )
+        cls_logits, logits = self.model(target_x, off_target_x, strands, epi)
         epi_logits = self.per_nt_epi_head(logits)
         logits = self.per_nt_classifier(logits)
-        return logits, epi_logits
+        return logits, epi_logits, cls_logits
     
     def mask_shit(self, batch):
         target_x, off_target_x, epi, y, counts, strands = batch
@@ -154,12 +126,27 @@ class PreTrainModel(pl.LightningModule):
             idx = torch.randint(seq_len, (empty.sum(),), device=target_x.device)
             mask_tensor[empty, idx] = True
         # Expand mask to hidden dimension
+        rand = torch.rand(batch_size, seq_len, device=target_x.device)
+        mask_mask = mask_tensor & (rand < 0.8)
+        random_mask = mask_tensor & (rand >= 0.8) & (rand < 0.9)
+
 
         # Apply mask: set masked positions to zero
         target_x = target_x.masked_fill(mask_tensor, 0)
+        random_tokens = torch.randint(
+            low=1,
+            high=self.vocab_size,
+            size=target_x.shape,
+            device=target_x.device,
+            dtype=target_x.dtype
+        )
+        target_x[random_mask] = random_tokens[random_mask]
+
         off_target_x = off_target_x.clone()
+        off_target_x[:, center - 23//2 - 1:center+23//2] = off_target_x[:, center - 23//2 - 1:center+23//2].masked_fill(mask_mask, 0)
+
+
         epi = epi.clone()
-        off_target_x[:, center - 23//2 - 1:center+23//2] = off_target_x[:, center - 23//2 - 1:center+23//2].masked_fill(mask_tensor, 0)
         if len(epi.shape) > 1:
             epi[:, center - 23//2 - 1:center+23//2] = epi[:, center - 23//2 - 1:center+23//2].masked_fill(mask_tensor.unsqueeze(-1), 0)
             d = torch.randint(low=0, high=min(32, self.windowsize // 2), size=(1,))
@@ -204,23 +191,30 @@ class PreTrainModel(pl.LightningModule):
         bs, slen = target_x.shape
         y = self.compute_tokenized_target(target_x=target_x, off_target_x=off_target_x, mask=mask)
         if len(epi.shape) == 1:
-            logits, epi_logits  = self(masked_target, masked_ot, None, strands)
+            logits, epi_logits, cls_logits  = self(masked_target, masked_ot, None, strands)
             epi_loss = torch.zeros(epi_logits.shape, device=epi_logits.device)
         else:
-            logits, epi_logits  = self(masked_target, masked_ot, epi_masked, strands)
+            logits, epi_logits, cls_logits  = self(masked_target, masked_ot, epi_masked, strands)
             epi_loss = self.epi_loss_fn(epi_logits, epi[:, center - 23//2 - 1:center+23//2]) * mask[..., None]
         masked_loss = self.loss_fn(logits.flatten(start_dim=0, end_dim=1), y.flatten()) * mask[..., None].flatten()
-
+            
         clsloss = masked_loss.sum() / mask.sum()
 
         epi_loss = epi_loss.sum(dim=(0,1)) / mask.sum()
 
         if self.training:
-            for eidx in range(self.num_epi):
-                self.log(f"train_epi_loss/epi{eidx}", epi_loss[eidx], on_step=False, on_epoch=True, prog_bar=True)
+            lr = self.optimizers().param_groups[0]["lr"]
+            self.log("lr", lr, prog_bar=True, on_step=False, on_epoch=True, rank_zero_only=True)
         epi_loss = (epi_loss * (self.alpha ** 2)).sum()
 
-        loss = clsloss + epi_loss
+        loss = clsloss #+ epi_loss
+        if self.use_energy:
+            energy_loss = self.energy_loss_fct(cls_logits.squeeze(), counts.to(torch.float))
+            if self.training:
+                self.log(f"energy_loss", energy_loss, on_step=False, on_epoch=True, prog_bar=True)
+            loss = loss + energy_loss
+
+
 
 
         
@@ -233,34 +227,24 @@ class PreTrainModel(pl.LightningModule):
         self.log("train_cls_loss", clsloss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train_epi_loss", epiloss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("epi_logits_var", epi_logits[mask].std() ,on_step=False, on_epoch=True,)
-        lr = self.optimizers().param_groups[0]["lr"]
-        self.log("lr", lr, prog_bar=True, on_step=False, on_epoch=True, rank_zero_only=True)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        loss, logits, epi_logits, y, mask, clsloss, epiloss = self.general_step(batch)
         preds = torch.softmax(logits, dim=-1)
         # Update AUPRC metric
-        self.auprc.update(preds[mask], y.int()[mask])
-        
-        self.log("val_loss", loss, prog_bar=True)
-        self.log("val_cls_loss", clsloss, prog_bar=True)
-        self.log("val_epi_loss", epiloss, prog_bar=True)
+        self.train_auprc.update(preds[mask], y.int()[mask])
         return loss
 
-    def on_validation_epoch_end(self):
+    
+    def on_train_epoch_end(self):
         # Compute AUPRC after whole epoch
-        auprc_val = self.auprc.compute()
-        self.log("val_auprc", auprc_val, prog_bar=True)
-        self.auprc.reset()
+        auprc_val = self.train_auprc.compute()
+        self.log("training_auprc", auprc_val, prog_bar=True, sync_dist=True)
+        self.train_auprc.reset()
     
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=0.01, betas=(0.9, 0.999))
 
         # Total number of training steps
-        train_loader = self.trainer.datamodule.train_dataloader()
         total_steps = self.trainer.estimated_stepping_batches
-        warmup_steps = min(5000, total_steps // 5)
+        warmup_steps = min(2000, total_steps // 5)
 
         def lr_lambda(current_step):
             if current_step < warmup_steps:
@@ -299,42 +283,45 @@ def run_pretraining(config):
     windowsize = config["windowsize"]
     merge = config["merge"]
     model_type = config["model_type"]
+    config["use_energy"] = False
 
     pl.seed_everything(seed,workers=True)
-    dataset = config.get("dataset", "datasets/TCellDatasetWithextendedSequencesAndIDs.tsv")
+
+    bw_dir = "EX_BigWigs" if "bw_dir" not in config else config["bw_dir"]
+    epi_mode = "np"
+    dataset = config["dataset"]
     df = pd.read_csv(dataset, sep="\t")
-    df = df[~pd.isna(df["AlphagenomeIndex"])]
-    df = df[[col for col in df.columns if col in ["Strand", "Score", "Target_sequence", "Guide_sequence", "label", "AlphagenomeIndex", "GuideID", "extended_off_target", "ID"]]]
-    run_settings = pd.read_csv("runSettings/RunSettingsLeaveOneOut.tsv", sep="\t")
-    run_settings["val_set"] = run_settings["val_set"].apply(lambda y: None)
-    run_settings["test_set"] = run_settings["test_set"].apply(lambda y: [])
-    run_settings["exclude"] = run_settings["exclude"].apply(eval)
-    dm = MyDataModule(df, 
-        val_guides=run_settings.iloc[train_test_split]["val_set"], 
-        test_guides=run_settings.iloc[train_test_split]["test_set"], 
-        exclude=run_settings.iloc[train_test_split]["exclude"],
-        num_samples=batch_size*100, batch_size=batch_size, 
-        ag_dir=config.get("epi_dir", "AGTensors3"), 
-        embedding_type="CRISPROfft" if model_type.lower() != "crosscrispr" else "raw", 
-        windowsize=windowsize,
-        epi_features=config["epi_features"],
-        oversample=False,
-        norm_epi=True if num_epi else False
+    dm = GenomicDataModule(
+            fasta_path="GRCh38.primary_assembly.genome.fa",
+            bw_dir=bw_dir,
+            epi_features=epi_features,
+            window_size=config["windowsize"],
+            batch_size=config["batch_size"],
+            num_workers = 10,
+            num_samples=batch_size*10,
+            norm_epi=True if config["num_epi"] else False,
+            use_energy=False,
+            mode=epi_mode,
+            df=df,
+            val_guides=[], 
+            test_guides=[], 
+
     )
-
-
-    
+    dm.oversample = False
     model = PreTrainModel(
-        context_layers=neighborhood_layers,
-        hidden_dim=hidden_dim,
-        num_epi=num_epi,
-        dropout=dropout,
-        lr=lr,
-        seed=seed,
-        windowsize=windowsize,
-        merge=merge,
-        epi_weights = epi_weights,
-    )
+            context_layers=neighborhood_layers,
+            hidden_dim=hidden_dim,
+            num_epi=num_epi,
+            dropout=dropout,
+            lr=lr,
+            seed=seed,
+            windowsize=windowsize,
+            merge=merge,
+            epi_weights = epi_weights,
+            use_energy=False
+
+        )
+
     checkpoint_cb = ModelCheckpoint(
         monitor="train_loss", 
         mode="min", 
@@ -345,20 +332,20 @@ def run_pretraining(config):
 
     logger = get_logger(config=config)
 
+    earlystop_cb = EarlyStopping(monitor="train_loss", mode="min", patience=patience)
     trainer = pl.Trainer(
         max_steps=50000,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
-        devices="auto",
-        callbacks=[checkpoint_cb],
+        devices=torch.cuda.device_count(),
+        callbacks=[checkpoint_cb, earlystop_cb],
         log_every_n_steps=10,
         logger=logger,
         deterministic=True,
-        accumulate_grad_batches=config["accumulate_grad_batches"],
+        accumulate_grad_batches=config.get("accumulate_grad_batches", 1),
         gradient_clip_val=0.5,
         precision="bf16-mixed",
         strategy=DDPStrategy(find_unused_parameters=True),
-
-    )
+            )
     trainer.fit(model, dm, ckpt_path=config["chkpt"] if "chkpt" in config else None)
 
 
@@ -367,49 +354,37 @@ def run_pretraining(config):
 
 
 if __name__ == "__main__":
+    #with open("artificial_param_combinations.json") as handle:
+    #    config = json.load(handle)
     idx = os.environ.get("SLURM_ARRAY_TASK_ID", None)
     if idx is None:
         epi_features = [            
-            "EX_ATAC",
-            "EX_H3K4me1",  
-            "EX_H3K4me3",  
-            #"EX_H3K9ac", # not present in alphagenome
-            "EX_H3K9me3",  
-            "EX_H3K27ac",  
-            "EX_H3K27me3",  
-            "EX_H3K36me3",
-            #"ATAC",
-            #"DNASE", 
-            #"RNA_SEQ",
-            #"CHIP_HISTONE"
+            "H3K4me1",  
+            "H3K4me3",  
+            "H3K36me3",
         ]
-        epi_features = ['+_polyA plus RNA-seq',
-            '+_total RNA-seq',
-            '-_polyA plus RNA-seq',
-            '-_total RNA-seq',
-            'H3K27ac',
-            'H3K27me3',
-            'H3K36me3',
-            'H3K4me1',
-            'H3K9me3',
-        ]
+        #epi_features = []
         params = {
-            "batch_size": 512,
+            "batch_size": 1024,
             "context_layers": 3,
             "hidden_dim": 512,
             "embed_size": 32,
-            "dropout": 0.3,
+            "dropout": 0.2,
             "epi_features": epi_features,
             "lr": 1e-4,
-            "patience": 50,
+            "patience": 100000,
             "seed": 42 * 0,
-            "split": 0,
-            "experiment": "PretrainingTest",
+            "split": 1,
+            "experiment": "PretrainingArtificialTest",
             "regression": False,
-            "windowsize": 512,
-            "merge": "early",
+            "windowsize": 23,
+            "merge": None,
             "model_type": "crosscrispr",
-            "accumulate_grad_batches": 2,
+            "use_energy": False,
+            "bw_dir": ["AGTensorsCL:0000624", "AGTensorsEFO:0002067"],
+            "epi_mode": "np"
+            #"chkpt": "RUNlogs/PretrainingArtificial/test_split0/ctl6_bs512_ws512_ue20_seed0_hashe0e76e6bafdf121cbfc3/run_/vv6/checkpoints/best_model.ckpt"
+
         }
     else:
         import argparse

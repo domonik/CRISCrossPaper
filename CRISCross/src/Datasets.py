@@ -756,9 +756,11 @@ class GenomicDataset(Dataset):
 
         # Read each BigWig feature for this region
         features = []
+        bw_dir = np.random.choice(self.bw_dir)
+
         for epi_feat in self.epi_features:
-            bw_dir = np.random.choice(self.bw_dir)
             file = os.path.join(bw_dir, f"{epi_feat}_{chrom}.npy")
+
             #file = os.path.join(self.bw_dir, f"{epi_feat}.bw")
             feat = np.memmap(file, dtype=np.float32, mode="r", shape=self.chrom_sizes[chrom])
             #with pyBigWig.open(file) as bw:
@@ -774,7 +776,7 @@ class GenomicDataset(Dataset):
                 epi[:, self.epi_log_mask] = torch.log1p(epi[:, self.epi_log_mask])
                 epi = (epi - self.epi_mean) / self.epi_std
             if not strand:
-                epi = epi.flip(-1)
+                epi = epi.flip(0)
 
         #epi = torch.log(epi + 1e-7)
         else:
@@ -830,8 +832,14 @@ class FineTuningGenomicDataset(Dataset):
         center = self.centers[idx]
 
  
-        start = center - self.window_size // 2
-        end = center + self.window_size // 2
+        half = -(-self.window_size // 2)   # ceil(window_size / 2), matches downstream's center index
+
+        if strand:
+            start = center - half
+        else:
+            start = center - (self.window_size - half)
+
+        end = start + self.window_size
         off_target_x = self.seq_dict[chrom][start:end]
         target_x = self.targets[idx]
         off_target_x = off_target_x.long()
@@ -857,7 +865,7 @@ class FineTuningGenomicDataset(Dataset):
                 epi[:, self.epi_log_mask] = torch.log1p(epi[:, self.epi_log_mask])
                 epi = (epi - self.epi_mean) / self.epi_std
             if not strand:
-                epi = epi.flip(-1)
+                epi = epi.flip(0)
         else:
             epi = 0
         counts = 0
@@ -1025,19 +1033,22 @@ class GenomicDataModule(pl.LightningDataModule):
          # SLURM sets TMPDIR, fallback to /tmp
         local_bw_dirs = self.local_bw_dirs
         print(f"Generating dataset from {self.bw_dirs} to {self.local_bw_dirs}...")
+        if self.mode == "bw":
 
-        for local_bw_dir in local_bw_dirs:
-            args = [(bw_path, local_bw_dir) for bw_path in self.bw_files]
-            os.makedirs(local_bw_dir, exist_ok=True)
-            if self.mode == "bw":
+            for local_bw_dir in local_bw_dirs:
+                args = [(bw_path, local_bw_dir) for bw_path in self.bw_files]
+                os.makedirs(local_bw_dir, exist_ok=True)
                 with multiprocessing.Pool(self.num_workers) as pool:
                     pool.starmap(convert_bigwig_to_memmap_per_chr, args)
-            elif self.mode == "np":
-                for src in self.bw_files:
-                    dst = os.path.join(local_bw_dir, os.path.basename(src))
-                    if os.path.exists(dst):
-                        continue
-                    shutil.copy2(src, dst)
+        elif self.mode == "np":
+            for src in self.bw_files:
+                dst = os.path.join(self.tmp_base, src)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                if os.path.exists(dst):
+                    continue
+                print(f"copying {src} to {dst}")
+
+                shutil.copy2(src, dst)
         print("Finished dataset generation")
 
 
@@ -1078,11 +1089,14 @@ class GenomicDataModule(pl.LightningDataModule):
 
         if self.norm_epi:
             stats = self._norm_epi()
+            print("epi stats:")
+            print(stats)
         else:
             stats = None
 
         if self.use_energy:
             energy_stats = self._norm_eng()
+
             kwargs = {"energy_stats": energy_stats}
         else:
             kwargs = {}
@@ -1277,7 +1291,16 @@ class GenomicDataModule(pl.LightningDataModule):
         elif len(self.val_guides):
             val_mask = torch.from_numpy(self.df["GuideID"].isin(self.val_guides).values)
         else:
-            val_mask = (torch.rand(test_mask.shape) < 0.2) & (~test_mask)
+            available = (~test_mask).nonzero(as_tuple=True)[0]
+
+            n_val = int(0.1 * len(available))
+
+            perm = available[torch.randperm(len(available))]
+
+            val_idx = perm[:n_val]
+
+            val_mask = torch.zeros_like(test_mask, dtype=torch.bool)
+            val_mask[val_idx] = True
 
         train_mask = (~((val_mask) | (test_mask)))
         self.compute_classweights(train_mask)

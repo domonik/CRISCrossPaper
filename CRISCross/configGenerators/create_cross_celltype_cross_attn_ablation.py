@@ -17,7 +17,7 @@ base_params = {
     "dropout": 0.2,
     "lr": 1e-4,
     "patience": 10,
-    "experiment": "CrossCellTypeTest",
+    "experiment": "CrossCellTypeTestJoinAblation",
     "regression": False,
     "merge": "early",
     "model_type": "crosscrispr",
@@ -91,8 +91,10 @@ os.makedirs(run_settings_dir, exist_ok=True)
 seeds = [i * 42 for i in range(25)]
 
 CHKPTS = {
-    "Arti-Ws512-AG": os.path.join("RUNlogs/PretrainingArtificialPaperFixed/test_split1/ctl3_bs1024_ws512_ue0_seed0_energyTrue_hash/run_/vv1",   "checkpoints", "last.ckpt"),
-    "Arti-Ws512+AG": os.path.join("RUNlogs/PretrainingArtificialPaperAG2/test_split1/ctl3_bs1024_ws512_ue1_seed0_energyTrue_hash2/run_/vv1",  "checkpoints", "last.ckpt"),
+    #"Arti-Ws23-AG": os.path.join("RUNlogs/PretrainingArtificialPaperFixed/test_split1/ctl3_bs1024_ws23_ue0_seed0_energyTrue_hash/run_/vv0",   "checkpoints", "last.ckpt"),
+    "Add-Ablation-Ws512-AG": os.path.join("RUNlogs/PretrainingArtificialPaperSeqJoin_add/test_split1/ctl3_bs256_ws512_ue0_seed0_energyTrue_hash/run_/vv0",   "checkpoints", "last.ckpt"),
+    #"Arti-Ws23+AG": os.path.join("RUNlogs/PretrainingArtificialPaperAGWTCNormCorr2/test_split1/ctl3_bs12800_ws23_ue1_seed0_energyTrue_hash2/run_/vv0",  "checkpoints", "last.ckpt"),
+    "Add-Ablation-Ws512+AG": os.path.join("RUNlogs/PretrainingArtificialPaperAGJoin_add/test_split1/ctl3_bs256_ws512_ue1_seed0_energyTrue_hash2/run_/vv0/",  "checkpoints", "last.ckpt"),
 }
 
 
@@ -107,6 +109,8 @@ if __name__ == "__main__":
             dataset_key = "T_cell"
 
             params = base_params.copy()
+            params["join_method"] = "add" if chkpt_key.startswith("Add") else "concat"
+
             ws = int(CHKPTS[chkpt_key].split("_ws")[-1].split("_")[0])
             params["epi_features"] = epi_features if "+AG" in chkpt_key else []
             params["merge"] = "early" if "+AG" in chkpt_key else None
@@ -153,10 +157,10 @@ if __name__ == "__main__":
             idx += 1
 
     # Write to JSON
-    with open("configs/fineTuningCRISPRATAG.json", "w") as f:
+    with open("configs/fineTuningCRISPRATAGJoinAblation.json", "w") as f:
         json.dump(fine_tune_configs, f, indent=2)
 
-    with open("configs/TestCRISPRATAG.json", "w") as f:
+    with open("configs/TestCRISPRATAGJoinAblation.json", "w") as f:
         json.dump(test_configs, f, indent=2)
 
     print(

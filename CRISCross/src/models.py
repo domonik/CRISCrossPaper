@@ -703,13 +703,16 @@ class StrandEmbedding(nn.Module):
         return x + self.strand_emb(strand_ids).unsqueeze(1)
 
 class CRISCross(nn.Module):
-    def __init__(self, vocab_size, dropout, context_layers: int, hidden_dim, num_epi, output_size, windowsize, merge):
+    def __init__(self, vocab_size, dropout, context_layers: int, hidden_dim, num_epi, output_size, windowsize, merge, return_cls_token=False, join_method = "cross" ):
         super().__init__()
         self.merge = merge
         self.kernel_size = 3
         self.transformer_dim = hidden_dim
         self.dropout = dropout
         self.vocab_size = vocab_size
+        self.return_cls_token = return_cls_token
+        self.join_method = join_method
+        assert self.join_method in ("cross", "add", "concat"), "No valid joining method"
 
         self.register_buffer("kernel", torch.tensor([self.vocab_size ** i for i in range(self.kernel_size)], dtype=torch.long))
         self.m_k = self.vocab_size ** self.kernel_size
@@ -747,8 +750,15 @@ class CRISCross(nn.Module):
         self.n_layers = context_layers
         self.self_attention = nn.ModuleList(SelfAttentionLayer(embed_dim=hidden_dim, dropout=dropout, mlp_ratio=4, num_heads=4) for _ in range(self.n_layers))
         self.self_ot_attention = nn.ModuleList(SelfAttentionLayer(embed_dim=hidden_dim, dropout=dropout, mlp_ratio=4, num_heads=4) for _ in range(self.n_layers))
-        self.cross_attention1 = nn.ModuleList(CrossAttentionLayer(embed_dim=hidden_dim, dropout=dropout, mlp_ratio=4) for _ in range(self.n_layers))
-        self.cross_attention2 = nn.ModuleList(CrossAttentionLayer(embed_dim=hidden_dim, dropout=dropout, mlp_ratio=4) for _ in range(self.n_layers))
+        if self.join_method == "cross":
+            self.cross_attention1 = nn.ModuleList(CrossAttentionLayer(embed_dim=hidden_dim, dropout=dropout, mlp_ratio=4) for _ in range(self.n_layers))
+            self.cross_attention2 = nn.ModuleList(CrossAttentionLayer(embed_dim=hidden_dim, dropout=dropout, mlp_ratio=4) for _ in range(self.n_layers))
+        
+        elif join_method == "concat":
+            self.concat_lins = nn.ModuleList([
+                nn.Linear(hidden_dim * 2, hidden_dim)
+                for _ in range(self.n_layers)
+            ])
         self.out_proj = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
@@ -756,7 +766,7 @@ class CRISCross(nn.Module):
             nn.Linear(hidden_dim, out_features=output_size)
         )
 
-    def forward(self, x, off_target_x, strand, epi=None):
+    def forward(self, x, off_target_x, strand, epi=None, cell_type_ids = None):
         strand = strand.long()
         x = x.long()
         off_target_x = off_target_x.long()
@@ -774,7 +784,9 @@ class CRISCross(nn.Module):
 
         ot = self.ot_embedding(ot)
         ot = self.token_type_emb(ot, center)
+        
         ot = self.strand_embedding(ot, strand)
+        
 
         ot = self.ot_positional_encoding(ot)
         if self.merge == "early" and epi is not None:
@@ -787,11 +799,33 @@ class CRISCross(nn.Module):
             x = self.self_attention[i](x)
             ot = self.self_ot_attention[i](ot)
             x_old = x
-            x = self.cross_attention1[i](x, ot[:, center-23//2-1:center+23//2])
-            if i < self.n_layers -1:
-                ot[:, center-23//2-1:center+23//2] = self.cross_attention2[i](ot[:, center-23//2-1:center+23//2], x_old)
+            if self.join_method == "cross":
+                x = self.cross_attention1[i](x, ot[:, center-23//2-1:center+23//2])
+                if i < self.n_layers -1:
+                    ot[:, center-23//2-1:center+23//2] = self.cross_attention2[i](ot[:, center-23//2-1:center+23//2], x_old)
+            if self.join_method == "add":
+                x [:, 1:] = x[:, 1:] + ot[:, center-23//2-1:center+23//2]
+            
+            elif self.join_method == "concat":
+                ot_center = ot[:, center-23//2-1:center+23//2]
 
-        return self.out_proj(x[:, 0]), x[:, 1:]
+                cls = x[:, :1]          # (B, 1, H)
+                tokens = x[:, 1:]       # (B, 23, H)
+
+                # Concatenate token features
+                tokens = torch.cat([tokens, ot_center], dim=-1)   # (B, 23, 2H)
+
+                # Project back to H
+                tokens = self.concat_lins[i](tokens)                  # (B, 23, H)
+
+                # Reattach CLS token
+                x = torch.cat([cls, tokens], dim=1)    
+            
+            
+        if self.return_cls_token:
+            return self.out_proj(x[:, 0]), x[:, 1:], x[:, 0]
+        else:
+            return self.out_proj(x[:, 0]), x[:, 1:]
 
 
 class CnnCRISPR(nn.Module):
