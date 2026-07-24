@@ -81,6 +81,8 @@ def main():
     ag_res = mannwhitneyu(cdf[cdf["mode"] == "Arti-Ws512-AG_ccTesting"]["AUCPR"], cdf[cdf["mode"] == "Arti-Ws512+AG_ccTesting"]["AUCPR"])
     print(ag_res)
     print(pcdf)
+    breakpoint()
+
 
     df =  df[(df["comparison"] == "CRISPRAT") & (df["window_size"].isin([512]))]
     #df = pd.concat((df, sdf))

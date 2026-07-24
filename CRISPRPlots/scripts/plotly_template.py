@@ -37,8 +37,8 @@ COLORS = {
     "cat10": "rgb(188, 189, 34)",
     "cat11": "rgb(23, 190, 207)",
 }
-WIDTH = 691
-SINGLE_COL = 336
+WIDTH = 672
+SINGLE_COL = 325
 
 
 def rgb_to_rgba(color_str, opacity):
@@ -117,7 +117,7 @@ def register_template():
                 
 
             },
-            "paper_bgcolor": "rgba(0,0,0,0)",
+            "paper_bgcolor": "white",
 
             "font": {"family": "Arial", "size": PT6, "color": "black"},
             "margin": {"b": 50, "t": 10, "l":30 , "r": 30   },

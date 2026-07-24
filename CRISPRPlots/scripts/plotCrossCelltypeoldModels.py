@@ -10,7 +10,8 @@ fixNames = {
     "cnnCRISPR": "CnnCrispr",
     "crisprIP": "CRISPR-IP",
     "CRISPert": "CRISPert", 
-    "CRISCross": "CRISCross"
+    "CRISCross": "CRISCross",
+    "CRISCrossThree": "CRISCrossThree"
     
 }
 
@@ -28,15 +29,30 @@ def main():
     file = "../Results/FinalSummary.tsv"
     df2 = pd.read_csv(file, sep="\t")
     agstring = "Sequence & AlphaGenome ATAC-seq"
+    seed_cut = [42 * i for i in range(50)][25]
+    breakpoint()
 
-    df2 = df2[(df2["dataset"] == "K562") & (df2["mode"] == "Arti-Ws512+AG_ccTesting") & (df2["run"].str.contains("AG"))]
+    df2 = df2[
+        (df2["dataset"] == "K562") & (df2["mode"] == "Arti-Ws512-AG_ccTesting") |
+        (df2["dataset"] == "K562") & (df2["mode"] == "Arti-Ws512+AG_ccTesting") & (df2["run"].str.contains("AG")) |
+        (df2["dataset"] == "K562") & (df2["mode"] == "Arti-Ws23-AG_ccTesting")  |
+        (df2["dataset"] == "K562") & (df2["mode"] == "Arti-Ws23+AG_ccTesting") & (df2["run"].str.contains("AG")) 
+    ]
+    breakpoint()
+
+    df2 = df2[(df2["run"].str[-1] == "0")]
+
+    df2 = df2[df2["seed"] < seed_cut]
+
     df2["name"] = "CRISCross"
+    df2.loc[df2["comparison"] == "ThreeTrack", "name"] = "CRISCrossThree"
     df2["aucpr"] = df2["AUCPR"]
     df2["cell_type"] = df2["dataset"]
-    df2["features"] = agstring
+    df2["features"] = df2["run"].apply(lambda x: agstring if "+AG" in x else "Sequence only")
     df["cell_type"] = df["cell_type"].map(fix_celltype)
     df = df[df["cell_type"] == "K562"]
     df["features"] = "Sequence only"
+    breakpoint()
     df = pd.concat((df, df2))
 
     fig = make_subplots(
@@ -46,15 +62,18 @@ def main():
         #column_widths=[0.6, 0.4]
     )
     fig.update_annotations(font=dict(size=PT7))
-    df = df.groupby(["name", "cell_type", "features"], as_index=False)["aucpr"].mean()   
+    df = df.groupby(["name", "cell_type", "features", "window_size"], as_index=False, dropna=False)["aucpr"].mean()   
     df = df.sort_values("aucpr")
     df["model"] = df["name"].map(fixNames)
+    df.loc[df["model"] == "CRISCross", "model"] =  df.loc[df["model"] == "CRISCross"]["model"] + "<br>" + df.loc[df["model"] == "CRISCross"]["window_size"].astype(int).astype(str) + " nt"
 
     for i, cell_type in enumerate(cols):
         sdf = df[df["cell_type"] == cell_type]
         for feat in ["Sequence only", agstring]:
             sdf2 = sdf[sdf["features"] == feat]
             color = COLORS["jaxgold"] if "ATAC" in feat else COLORS["seagrey"]
+            if "ATAC" in feat:
+                breakpoint()
             fig.add_trace(
                     go.Bar(
                         x=sdf2["model"],

@@ -32,7 +32,7 @@ histone_size = (128, 1)
 
 EPI_FEATURES = {
             "ATAC": _default_size,
-            "DNASE": _default_size, 
+            #"DNASE": _default_size, 
             "EX_ATAC": _default_size,
             "EX_H3K4me1": _default_size,
             "EX_H3K4me3": _default_size,
@@ -42,9 +42,9 @@ EPI_FEATURES = {
             "EX_H3K27me3": _default_size,
             "EX_H3K36me3": _default_size,
             #'+_polyA plus RNA-seq': _default_size,
-            '+_total RNA-seq': _default_size,
+            #'+_total RNA-seq': _default_size,
             #'-_polyA plus RNA-seq': _default_size,
-            '-_total RNA-seq': _default_size,
+            #'-_total RNA-seq': _default_size,
             'H3K27ac': histone_size,
             'H3K27me3': histone_size,
             'H3K36me3': histone_size,
